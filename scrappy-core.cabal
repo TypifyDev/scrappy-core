@@ -49,12 +49,15 @@ library
                     , Scrappy.Elem.ITextElemParser
                     , Scrappy.Elem.ChainHTML
                     , Scrappy.Links
+                    , Scrappy.Files
                     , Scrappy.Types
 
   build-depends:       base
                      , aeson
                      , bytestring
                      , containers
+                     , directory
+                     , filepath
                      , lens
                      , modern-uri
                      -- ^ less maintained?
