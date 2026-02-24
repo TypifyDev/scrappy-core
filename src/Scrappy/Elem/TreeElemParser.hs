@@ -104,7 +104,7 @@ treeElemParser'  elemOpts matchh attrsSubset = do
                                     $ (try (string "/>") >> return [])  
                                     <|> (try $ innerElemParser2 elem' matchh)
                                     <|> (selfClosingTextful matchh)
-     return $ TreeHTML elem' attrs' (reverse matchBook) (reverse inText) (reverse treees)
+     return $ TreeHTML elem' attrs' matchBook inText treees
 
 -------------------------------------------------------------------------------------------------------------------
 
@@ -116,10 +116,10 @@ treeElemParser'  elemOpts matchh attrsSubset = do
 innerTreeElemParser :: (ShowHTML a, Stream s m Char) =>
                        Elem
                     -> Maybe (ParsecT s u m a)
-                    -> ParsecT s u m (String, [a], [Tree ElemHead]) 
+                    -> ParsecT s u m (String, [a], [Tree ElemHead])
 innerTreeElemParser elem' matchh = do
   fmap (foldr foldFuncTrup mempty)
-    $ (try (string "/>") >> return [])  
+    $ (try (string "/>") >> return [])
     <|> (try $ innerElemParser2 elem' matchh)
     <|> (selfClosingTextful matchh)
 -- then i apply this to all leaves of the Map
@@ -215,16 +215,13 @@ htmlGenParserRepeat elemTag match manyElHeadss = {-parsesTreeHs-}
     
       -- fmap ((flip (:) []) . IText . (:[])) specificITextParser
       -- fmap ((flip (:) []) . IText . fst)  (manyTill_ anyChar (endTag elemTag))
-    manyElHeads -> 
-      -- ((endTag elemTag) >> validateGPR manyElHeads)
+    manyElHeads ->
+      -- For strict matching: try expected elements first, fail on unexpected elements
       liftA2 (:) (fmap Match $ try (fromMaybe parserZero match)) (htmlGenParserRepeat elemTag match manyElHeads)
-      <|> liftA2 (:) (fmap IText $ try stylingElem) (htmlGenParserRepeat elemTag match manyElHeads) 
       <|> try ((treeElemParserSpecificContinuous match manyElHeads)
                >>= (\(sM, a) -> fmap ((Element a):) (htmlGenParserRepeat elemTag match sM)))
-
-               -- if at this point in time with all possibilities considered:
-                   -- do (if openingTag then fail else Itext)
-      <|> liftA2 (:) (fmap (IText . (:[])) specificChar) (htmlGenParserRepeat elemTag match manyElHeads) 
+      -- Only allow text content that's not part of an opening tag
+      <|> liftA2 (:) (fmap (IText . (:[])) (specificChar' elemTag)) (htmlGenParserRepeat elemTag match manyElHeads) 
       -- case parseOpeningTag 
 
       
@@ -387,19 +384,19 @@ innerParserContains :: (Stream s m Char, ShowHTML a) =>
                        Maybe (ParsecT s u m a)
                     -> Elem
                     -> SubTree ElemHead
-                    -> ParsecT s u m ([a], String, [Tree ElemHead]) 
+                    -> ParsecT s u m ([a], String, [Tree ElemHead])
 innerParserContains match tag subTree =
   case elem tag selfClosing of
     True -> if not $ null subTree then undefined else do
       (try (string ">") <|> string "/>")
       return (mempty, mempty, mempty)
-    False -> do 
-      -- char '>'
+    False -> do
+      char '>'
       x <- htmlGenParserContains tag match (reverse $ groupify subTree [])
       let
-        -- | need to ensure all the trees are in order 
+        -- | need to ensure all the trees are in order
         (inText, matchBook, treees) = foldr foldFuncTrup mempty (x)
-      return (matchBook, (reverse inText), (reverse treees))--(_matches itr) (_innerText itr) (innerTree itr)
+      return (matchBook, inText, treees)
 
 -- | Very similar to treeElemParserSpecific except that it allows for a new nodes in the HTML DOM tree
 -- | to exist at random as long as when we resume parsing we still find all of the branches we found in the
@@ -410,6 +407,7 @@ similarTreeH :: (Stream s m Char, ShowHTML a)
              -> ParsecT s u m (TreeHTML a)
 similarTreeH matchh treeH = do
   (e,at) <- parseOpeningTag (Just $ [elTag treeH]) (((fmap . fmap) Just) . Map.toList $ attrs treeH)
+  char '>'
   (inTx, m, inTr) <-
     fmap (foldr foldFuncTrup mempty) (htmlGenParserContains e matchh (groupify (_innerTree' treeH) []))
   return $ TreeHTML e at m inTx inTr
@@ -508,7 +506,7 @@ innerParserSpecific match tag subTree =
       let
         -- | need to ensure all the trees are in order 
         (inText, matchBook, treees) = foldr foldFuncTrup mempty (x)
-      return (matchBook, (reverse inText), (reverse treees))--(_matches itr) (_innerText itr) (innerTree itr)
+      return (matchBook, inText, treees)
 
 
 
@@ -835,8 +833,7 @@ stylingElem :: Stream s m Char => ParsecT s u m String
 stylingElem = do
   (e,_) <- parseOpeningTag (Just stylingTags) []
   char '>'
-  fmap (reverse . fst) $ manyTill_ anyChar (endTag e) 
-  -- matches : Reversed >-> RW
+  fmap fst $ manyTill_ anyChar (endTag e)
   
 
 

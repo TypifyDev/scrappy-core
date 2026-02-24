@@ -37,7 +37,7 @@ scrapeLinked = undefined
 -- TODO(galen): move to Scrappy.Scrape
 -- Generic function for dropping an abstract pattern from text 
 filterFromTextP :: ScraperT a -> ScraperT String
-filterFromTextP p = (many $ try p) >> (liftA2 (:) anyChar $ filterFromTextP p)
+filterFromTextP p = (many (try p)) >> (liftA2 (:) anyChar (filterFromTextP p))
 
 -- We can return a string since this will never fail
 -- its provably impossible 

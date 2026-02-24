@@ -9,10 +9,28 @@ let
   wikiScraper = import ./default.nix;
   drv = variant (haskellPackages.callPackage wikiScraper {}); 
 in
-pkgs.mkShell {
-  buildInputs = [ pkgs.cabal-install ];
-  inputsFrom = [ (if pkgs.lib.inNixShell then drv.env else drv) ];
-} 
+pkgs.haskell.packages.ghc910.shellFor {
+  packages = p: with p; [ drv ];
+  strictDeps = true;
+  withHoogle = true;
+  nativeBuildInputs = with nixpkgs; [
+    cabal-install
+    ghcid
+    haskell-language-server
+    hlint
+  ];
+}   
+
+
+# pkgs.mkShell {
+#   buildInputs = [ 
+#     pkgs.cabal-install 
+#     pkgs.haskell-language-server
+#     pkgs.ghcid
+#     pkgs.hlint
+#   ];
+#   inputsFrom = [ (if pkgs.lib.inNixShell then drv.env else drv) ];
+# } 
 
 
 

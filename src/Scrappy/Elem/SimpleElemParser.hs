@@ -79,7 +79,7 @@ elemParser elemList innerSpec attrs = do
         $ (try (string "/>") >> return [])
         <|> (try $ innerElemParser elem' innerSpec) -- need to be sure that we have exhausted looking for an end tag, then we can do the following safely
         <|> (selfClosingTextful innerSpec)
-      return $ Elem' elem' attrs' matches (reverse asString)
+      return $ Elem' elem' attrs' matches asString
 
 
 -- | Generic interface for building Html element patterns where we do not differentiate based on whats inside
@@ -104,11 +104,11 @@ elemParserWhere elemList innerSpec attr pred = do
         $ (try (string "/>") >> return [])
         <|> (try $ innerElemParser elem' innerSpec) -- need to be sure that we have exhausted looking for an end tag, then we can do the following safely
         <|> (selfClosingTextful innerSpec)
-      return $ Elem' elem' attrs' matches (reverse asString)
+      return $ Elem' elem' attrs' matches asString
 
 
 
- 
+
 clickableHref :: Stream s m Char => Bool -> LastUrl -> ParsecT s u m Clickable
 clickableHref booly cUrl = do
   elA <- parseOpeningTag Nothing [("href", Nothing)]
@@ -290,7 +290,7 @@ elemParserInternal elemList innerSpec attrs = do
     $ (try (string "/>") >> return [])
     <|> (try $ innerElemParser elem' innerSpec) -- need to be sure that we have exhausted looking for an end tag, then we can do the following safely
     <|> (selfClosingTextful innerSpec)
-  return $ Elem' elem' attrs' matches (reverse asString)
+  return $ Elem' elem' attrs' matches asString
 
 
 -- elemParserInternalV2 :: (ShowHTML a, Stream s m Char) =>
@@ -349,8 +349,7 @@ stylingElem :: Stream s m Char => ParsecT s u m String
 stylingElem = do
   (e,_) <- parseOpeningTag (Just stylingTags) []
   char '>'
-  fmap (reverse. fst) $ manyTill_ anyChar (endTag e) 
-  -- matches : Reversed >-> RW
+  fmap fst $ manyTill_ anyChar (endTag e)
   
 -- f :: ([a], [b], [c]) -> Elem' a
 -- f (x,y,z) = f' x y z

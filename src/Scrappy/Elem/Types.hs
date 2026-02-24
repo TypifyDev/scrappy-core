@@ -432,13 +432,21 @@ elemToStr elem = "<" <> elTag elem <> buildAttrs (toList (attrs elem)) <> ">" <>
     buildAttrs (attr:attrss) = " " <> fst attr <> "=" <> "\"" <> snd attr <> "\"" <> buildAttrs attrss
 
 
+-- | List of HTML self-closing (void) elements
+selfClosingElems :: [String]
+selfClosingElems = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]
+
 treeElemToStr :: (ShowHTML a) => TreeHTML a -> String
 treeElemToStr (TreeHTML{..}) =
-  "<" <> _topEl <> mdToStringPairs _topAttrs <> ">" <> _innerText'  <> "</" <>  _topEl <> ">"
-  where mdToStringPairs attrsSet = go (toList attrsSet)
+  if _topEl `elem` selfClosingElems
+  then "<" <> _topEl <> mdToStringPairs _topAttrs <> ">"
+  else "<" <> _topEl <> mdToStringPairs _topAttrs <> ">" <> _innerText'  <> "</" <>  _topEl <> ">"
+  where mdToStringPairs attrsSet = case toList attrsSet of
+          [] -> ""
+          attrs -> " " <> go attrs
         go [] = ""
-        go (atr:[])        = (fst atr) <> "=" <> ('"' : snd atr) <> ('"' : []) 
-        go (atr: attrsSet) = (fst atr) <> "=" <> ('"' : snd atr) <> ('"' : []) <> go attrsSet
+        go (atr:[])        = (fst atr) <> "=" <> ('"' : snd atr) <> ('"' : [])
+        go (atr: attrsSet) = (fst atr) <> "=" <> ('"' : snd atr) <> "\" " <> go attrsSet
 
 
 -- Future concern:
@@ -464,27 +472,27 @@ foldFuncMatchlist hMatcher itr = undefined --case hMatcher of
 
 -- | Bug found: matches start right way then get reversed 
 
-foldFuncTup :: (ShowHTML (e a), ShowHTML a, ElementRep e) => HTMLMatcher e a -> (String, [a]) -> (String, [a]) 
+foldFuncTup :: (ShowHTML (e a), ShowHTML a, ElementRep e) => HTMLMatcher e a -> (String, [a]) -> (String, [a])
 foldFuncTup hMatcher itr = case hMatcher of
-   IText str -> 
-    (fst itr <> str, snd itr)
+   IText str ->
+    (str <> fst itr, snd itr)
     --  May need to enforce a Show Instance on 'mat'
-   Match mat -> 
-    (fst itr <> (reverse $ showH mat), snd itr <> [mat])
+   Match mat ->
+    (showH mat <> fst itr, snd itr <> [mat])
   --concat to fullInnerText
    Element elem  -> --interEl :: ElemHead [HtmlMatcher]
-    (fst itr <> (reverse $ showH elem), snd itr <> matches' elem)
+    (showH elem <> fst itr, snd itr <> matches' elem)
 
-foldFuncTrup :: (ShowHTML a) => HTMLMatcher TreeHTML a -> (String, [a], Forest ElemHead) -> (String, [a], Forest ElemHead) 
+foldFuncTrup :: (ShowHTML a) => HTMLMatcher TreeHTML a -> (String, [a], Forest ElemHead) -> (String, [a], Forest ElemHead)
 foldFuncTrup hMatcher itr = case hMatcher of
-  IText str -> 
-    (fst' itr <> str, snd' itr, thd' itr)
+  IText str ->
+    (str <> fst' itr, snd' itr, thd' itr)
     --  May need to enforce a Show Instance on 'mat'
-  Match mat -> 
-    (fst' itr <> (showH mat), snd' itr <> [mat], thd' itr)
+  Match mat ->
+    (showH mat <> fst' itr, snd' itr <> [mat], thd' itr)
   --concat to fullInnerText
   Element elem  -> --interEl :: ElemHead [HtmlMatcher]
-    (fst' itr <> (reverse $ showH elem), snd' itr <> matches' elem, thd' itr <> ((makeBranch elem):[]))
+    (showH elem <> fst' itr, snd' itr <> matches' elem, thd' itr <> [makeBranch elem])
 
 -- | In our failed test case with the command : parse f "" "<a></div></a>"
   -- where f :: (Stream s m Char) => ParsecT s u m (TreeHTML String); f = treeElemParser (Just ["a"]) Nothing []
@@ -559,14 +567,14 @@ thd' (_,_,c) = c
 
 foldFuncITR :: (ShowHTML a, ElementRep e) => HTMLMatcher e a -> InnerTextResult a -> InnerTextResult a
 foldFuncITR hMatcher itr = case hMatcher of
-  IText str -> 
-    InnerTextResult (_matchesITR itr) (_fullInner itr <> str)
+  IText str ->
+    InnerTextResult (_matchesITR itr) (str <> _fullInner itr)
     --  May need to enforce a Show Instance on 'mat'
-  Match mat -> 
-    InnerTextResult (mat : _matchesITR itr) (_fullInner itr <> (showH mat))
+  Match mat ->
+    InnerTextResult (_matchesITR itr <> [mat]) (showH mat <> _fullInner itr)
   --concat to fullInnerText
   Element elem  -> --interEl :: ElemHead [HtmlMatcher]
-    InnerTextResult (matches' elem <> _matchesITR itr) (_fullInner itr <> (innerText' elem))
+    InnerTextResult (_matchesITR itr <> matches' elem) (innerText' elem <> _fullInner itr)
 
 
 -- foldFuncITHT :: (ShowHTML a, ElementRep e) => HTMLMatcher TreeHTML a -> InnerTextResult a -> InnerTextResult a
@@ -577,15 +585,15 @@ fHM_c :: (InnerHTMLRep TreeHTML InnerTextHTMLTree a, ShowHTML a) =>
          HTMLMatcher TreeHTML a
       -> InnerTextHTMLTree a
       -> InnerTextHTMLTree a
-fHM_c hMatcher ithT = case hMatcher of 
-  IText str -> 
-    InnerTextHTMLTree (_matches ithT) (_innerText ithT <> str) (innerTree ithT)
+fHM_c hMatcher ithT = case hMatcher of
+  IText str ->
+    InnerTextHTMLTree (_matches ithT) (str <> _innerText ithT) (innerTree ithT)
       --  May need to enforce a Show Instance on 'mat'
-  Match mat -> 
-    InnerTextHTMLTree (mat : (_matches ithT)) (_innerText ithT <> (showH mat)) (innerTree ithT)
+  Match mat ->
+    InnerTextHTMLTree (_matches ithT <> [mat]) (showH mat <> _innerText ithT) (innerTree ithT)
       --concat to fullInnerText
   Element htmlTree -> --interEl :: ElemHead [HtmlMatcher]
-    InnerTextHTMLTree (_matches ithT <> matches' htmlTree) ((_innerText ithT) <> showH htmlTree) ((makeBranch htmlTree) : innerTree ithT)
+    InnerTextHTMLTree (_matches ithT <> matches' htmlTree) (showH htmlTree <> _innerText ithT) (innerTree ithT <> [makeBranch htmlTree])
 
 
 makeBranch :: TreeHTML a -> Tree ElemHead
@@ -599,15 +607,15 @@ endTag elem = try (string ("</" <> elem <> ">"))
 
 
 enoughMatches :: Int -> String -> Map String String -> (String, [a]) -> ParsecT s u m (Elem' a)
-enoughMatches required e a (asString, matches) = 
+enoughMatches required e a (asString, matches) =
   if required <= (length matches)
-  then return $ Elem' e a matches (reverse asString)
-  else parserFail "not enough matches" -- should throw real error 
+  then return $ Elem' e a matches asString
+  else parserFail "not enough matches" -- should throw real error
 
 enoughMatchesTree :: Int -> String -> Map String String -> (String, [a], Forest ElemHead) -> ParsecT s u m (TreeHTML a)
-enoughMatchesTree required e a (asString, matches, forest) = 
+enoughMatchesTree required e a (asString, matches, forest) =
   if required <= (length matches)
-  then return $ TreeHTML e a matches (reverse asString) forest
+  then return $ TreeHTML e a matches asString forest
   else parserFail "not enough matches" -- should throw real error 
 
 
