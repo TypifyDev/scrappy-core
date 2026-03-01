@@ -11,8 +11,6 @@ import qualified Data.Map as Map
 import Scrappy.Elem.TreeElemParser (treeElemParser)
 import qualified Scrappy.Elem.Types as ST
 
-import TestUtils (parseSucceeds)
-
 -- Helper type alias for TreeHTML parser
 type TreeParser = ParsecT String () Identity (ST.TreeHTML String)
 
@@ -219,7 +217,7 @@ spec = do
           length elements `shouldBe` 1
 
           -- Direct access to the inner TreeHTML - no re-parsing needed!
-          let innerTree = head elements
+          let innerTree = elements !! 0
           ST._topEl innerTree `shouldBe` "div"
           Map.lookup "class" (ST._topAttrs innerTree) `shouldBe` Just "inner"
           ST._innerText' innerTree `shouldBe` "content"
@@ -276,7 +274,7 @@ spec = do
           let elements = [t | ST.Element t <- ST._rawInner tree]
           length elements `shouldBe` 1
 
-          let spanTree = head elements
+          let spanTree = elements !! 0
           ST._topEl spanTree `shouldBe` "span"
           ST._innerText' spanTree `shouldBe` "important text"
         Left err -> expectationFailure $ show err

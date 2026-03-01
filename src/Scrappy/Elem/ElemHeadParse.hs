@@ -5,11 +5,11 @@
 module Scrappy.Elem.ElemHeadParse where
 
 import Scrappy.Links (Link, LastUrl, CurrentUrl)
-import Scrappy.Elem.Types (Elem, Elem', ElemHead, Attrs, AttrsError(IncorrectAttrs), getHrefAttrs) -- Attr)
+import Scrappy.Elem.Types (Elem, ElemHead, Attrs, AttrsError(IncorrectAttrs), getHrefAttrs) -- Attr)
 
 import Control.Applicative (some)
 import Text.Parsec (Stream, ParsecT, (<|>), string, try, noneOf, parserZero, char, option, space,
-                   alphaNum, many1, between, many, letter, parserFail, optional, manyTill)
+                   alphaNum, between, many, parserFail, optional)
 import Data.Map as Map (Map, fromList, lookup, toList) 
 import Data.Maybe (fromMaybe)
 --import Witherable (mapMaybe)
@@ -32,10 +32,10 @@ href' = undefined --  bo
 
 -- | Safe because it forces parse of the entire ElemHead then pulls if there
 -- | Designed for use in findSomeHtml
-parseAttrSafe :: Stream s m Char => String -> ParsecT s u m String 
-parseAttrSafe attrName = do
-  tag <- parseOpeningTag Nothing [(attrName, Nothing)] -- i could in theory pass an expression as value
-  case (Map.lookup attrName . snd) tag of
+parseAttrSafe :: Stream s m Char => String -> ParsecT s u m String
+parseAttrSafe attrNm = do
+  tag <- parseOpeningTag Nothing [(attrNm, Nothing)] -- i could in theory pass an expression as value
+  case (Map.lookup attrNm . snd) tag of
     Nothing -> parserZero
     Just a -> return a
 
@@ -170,10 +170,11 @@ attrsParser attrs = do
 
 
 isAttrsMatch' :: Map String String -> [(String, Maybe String)] -> Bool
-isAttrsMatch' _ [] = True 
-isAttrsMatch' mapAttr ((name, maybeVal):desired) 
-  | Map.lookup name mapAttr == Nothing = False 
-  | (Map.lookup name mapAttr == maybeVal) || (maybeVal == Nothing) = isAttrsMatch mapAttr desired 
+isAttrsMatch' _ [] = True
+isAttrsMatch' mapAttr ((name, maybeVal):desired)
+  | Map.lookup name mapAttr == Nothing = False
+  | (Map.lookup name mapAttr == maybeVal) || (maybeVal == Nothing) = isAttrsMatch mapAttr desired
+  | otherwise = False 
 
 isAttrsMatch :: Map String String -> [(String, Maybe String)] -> Bool
 isAttrsMatch _ [] = True
@@ -185,7 +186,7 @@ isAttrsMatch mapAttr ((name, maybeVal): desired) = case maybeVal of
         
   Nothing ->
     case Map.lookup name mapAttr of
-      Just irrValFromKey {- we only care about the name -} -> isAttrsMatch mapAttr desired
+      Just _ {- we only care about the name -} -> isAttrsMatch mapAttr desired
       Nothing -> False
 
 attrsFit :: Map String String -> [(String, (String -> Bool))] -> Bool
@@ -232,19 +233,19 @@ attrsParserDesc attrs = do
 
 
 parseOpeningTagDesc :: Stream s m Char => Maybe [Elem] -> [(String, String)] -> ParsecT s u m (Elem, Attrs)
-parseOpeningTagDesc elemOpts attrs = do
+parseOpeningTagDesc elemOpts attrList = do
   _ <- char '<'
-  elem <- mkElemtagParser elemOpts
-  attrs <- attrsParserDesc attrs
-  return (elem, attrs) 
+  el <- mkElemtagParser elemOpts
+  parsedAttrs <- attrsParserDesc attrList
+  return (el, parsedAttrs) 
 
 
 -- | Allows for certain degrees of freedom such as 1 spot off eg 123 vs 1230 (or even (109|22))
--- | as well as any numerical digit must also be a numerical digit from 0 to 9 
+-- | as well as any numerical digit must also be a numerical digit from 0 to 9
 digitEq :: String -> String -> Bool
-digitEq [] [] = True -- Only time the func gives True 
-digitEq [] (y:ys) = False
-digitEq (x:xs) [] = False
+digitEq [] [] = True -- Only time the func gives True
+digitEq [] (_:_) = False
+digitEq (_:_) [] = False
 digitEq (charA:xs) (charB:ys) =
   if charA == charB
   then True && digitEq xs ys 
@@ -259,48 +260,49 @@ digitEq (charA:xs) (charB:ys) =
 -- B; 1234red
 
 saveDigitEq :: String -> String -> Bool
-saveDigitEq as bs =
-  if elem ((length as) - (length bs)) [1,-1]
-  then -- allows for one more digit 
-    if (elem (head as) ['0'..'9']) || (elem (head bs) ['0'..'9']) 
-    then svDigEq as bs 
+saveDigitEq [] _ = False
+saveDigitEq _ [] = False
+saveDigitEq as@(a:_) bs@(b:_) =
+  if elem (length as - length bs) [1,-1]
+  then -- allows for one more digit
+    if elem a ['0'..'9'] || elem b ['0'..'9']
+    then svDigEq as bs
     else False
   else False
 
-svDigEq :: String -> String -> Bool     
-svDigEq (charA:as) (charB:bs) =   -- True
-  if head as == charB
-  then digitEq (tail as) bs 
-  else
-    if head bs == charA
-    then digitEq as (tail bs)
-    else False || saveDigitEq (charA:as) bs || saveDigitEq as (charB:bs)
+svDigEq :: String -> String -> Bool
+svDigEq [] _ = False
+svDigEq _ [] = False
+svDigEq (charA:as) (charB:bs) = case (as, bs) of
+  (a:restA, _) | a == charB -> digitEq restA bs
+  (_, b:restB) | b == charA -> digitEq as restB
+  _ -> saveDigitEq (charA:as) bs || saveDigitEq as (charB:bs)
 
 
 
 -- OR!!!
 digitEqFree :: [Char] -> [Char] -> Bool
 digitEqFree [] [] = True
-digitEqFree as [] = if elem (head as) ['0'..'9'] then digitEqFree (tail as) [] else False
-digitEqFree [] bs = if elem (head bs) ['0'..'9'] then digitEqFree [] (tail bs) else False 
-digitEqFree as bs =
-  if elem (head as) ['0'..'9'] then digitEqFree (tail as) bs
+digitEqFree (a:rest) [] = if elem a ['0'..'9'] then digitEqFree rest [] else False
+digitEqFree [] (b:rest) = if elem b ['0'..'9'] then digitEqFree [] rest else False
+digitEqFree (a:restA) (b:restB) =
+  if elem a ['0'..'9'] then digitEqFree restA (b:restB)
   else
-    if elem (head bs) ['0'..'9'] then digitEqFree as (tail bs)
+    if elem b ['0'..'9'] then digitEqFree (a:restA) restB
     else
-      if head as == (head bs) then digitEqFree (tail as) (tail bs)
+      if a == b then digitEqFree restA restB
       else False 
       
 
 
 unfit :: [(String, String)] -> Map String String -> [(String, String)]
-unfit [] _ = [] 
-unfit ((n,v):ns) map = case Map.lookup n map of
-  Nothing -> (n, "no attr") : unfit ns map
-  Just val -> if elem n ["href", "alt", "title"] then  unfit ns map
+unfit [] _ = []
+unfit ((n,v):ns) mappy = case Map.lookup n mappy of
+  Nothing -> (n, "no attr") : unfit ns mappy
+  Just val -> if elem n ["href", "alt", "title"] then unfit ns mappy
               else if digitEq v val
-                   then unfit ns map
-                   else (n<>":"<>"("<>val<>"|"<>v<>")", "failed test") : unfit ns map 
+                   then unfit ns mappy
+                   else (n<>":"<>"("<>val<>"|"<>v<>")", "failed test") : unfit ns mappy 
 
 
 mkAttrsDesc :: [(String, String)] -> [(String, (String -> Bool))]
@@ -338,12 +340,12 @@ parseOpeningTag :: Stream s m Char => Maybe [Elem] -> [(String, Maybe String)] -
 parseOpeningTag elemOpts attrsSubset = do
   -- _ <- MParsec.manyTill anyToken (char '<' >> elemOpts >> attrsParser attrsSubset) -- the buildElemsOpts [Elem]
   _ <- char '<'
-  elem <- mkElemtagParser elemOpts
-  attrs <- attrsParser attrsSubset
-  optional (many space)
-  case attrs of
+  el <- mkElemtagParser elemOpts
+  parsedAttrs <- attrsParser attrsSubset
+  _ <- optional (many space)
+  case parsedAttrs of
     Left IncorrectAttrs -> parserZero
-    Right whateva -> return (elem, whateva)
+    Right whateva -> return (el, whateva)
 
 -- | For elemsOpts, will either be
 -- | Parser: (anyChar)

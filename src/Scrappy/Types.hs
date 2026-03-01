@@ -2,16 +2,7 @@
 
 module Scrappy.Types where
 
--- may change Types + Links -> Navigation + Something else 
-
-
-
--- import Network.HTTP.Client (CookieJar, requestBody, method, destroyCookieJar, responseCookieJar, httpLbs, RequestBody (RequestBodyBS, RequestBodyLBS), parseRequest, newManager, responseBody, Manager)
-import Control.Concurrent (ThreadId)
-import Control.Monad.Trans.Except (ExceptT)
-import Control.Monad.Trans.State.Lazy (StateT)
---import Data.Time.Clock.System
-import Data.Text (Text)
+-- may change Types + Links -> Navigation + Something else
 
 import Text.Parsec (ParsecT, parserZero)
 --import Witherable

@@ -7,10 +7,9 @@
 module Scrappy.Elem.ITextElemParser where
 
 
-import Scrappy.Elem.TreeElemParser (treeElemParser, sameTreeH)
+import Scrappy.Elem.TreeElemParser (treeElemParser)
 import Scrappy.Elem.SimpleElemParser (elemParser)
-import Scrappy.Elem.ElemHeadParse (parseOpeningTag, buildElemsOpts, attrsParser
-                          , mkElemtagParser)
+import Scrappy.Elem.ElemHeadParse (parseOpeningTag, buildElemsOpts, attrsParser)
 import Scrappy.Elem.Types (HTMLMatcher(..), Elem'(..), Elem, Attrs, ShowHTML(..)
                   , TreeHTML(..), endTag
                   , selfClosingTextful, noPat, innerText', _innerTree'
@@ -19,22 +18,20 @@ import Scrappy.Elem.Types (HTMLMatcher(..), Elem'(..), Elem, Attrs, ShowHTML(..)
 
 
 import Text.Parsec (parse, ParsecT, Stream, string, (<|>), anyChar, char
-                   , optional, try, manyTill, many, runParserT, ParseError
+                   , optional, try, manyTill, many
                    , parserZero, alphaNum, oneOf
                    , digit
                    , option
                    , letter
                    , space
                    )
-import Control.Monad
+import Control.Monad (when, void)
 import Control.Applicative (some)
-import Control.Applicative.Combinators (some, eitherP)
+import Control.Applicative.Combinators (eitherP)
 import Data.Either (fromRight, isRight)
-import Data.List (intercalate, intersperse)
+import Data.List (intercalate)
 
--- testing writersAbstract
-import Scrappy.Find 
-import Scrappy.Elem.ChainHTML
+import Scrappy.Elem.ChainHTML (nl, manyTill_)
 
 
 
@@ -73,8 +70,8 @@ emptyTree :: (ShowHTML a, Stream s m Char) =>
           -> Maybe (ParsecT s u m a)
           -> [(String, Maybe String)]
           -> ParsecT s u m (TreeHTML a)
-emptyTree elemOpts match attrs = do
-  e <- treeElemParser elemOpts match attrs 
+emptyTree elemOpts match attrsSpec = do
+  e <- treeElemParser elemOpts match attrsSpec 
   when (not $ null $ _innerTree' e) $ parserZero
   pure e
 
@@ -83,7 +80,7 @@ preface :: Stream s m Char =>
            ParsecT s u m pre
         -> ParsecT s u m a
         -> ParsecT s u m a
-preface pre p = p >> (fmap snd $ manyTill_ anyChar p)
+preface _pre p = p >> (fmap snd $ manyTill_ anyChar p)
 
 
 -- | Returns a minimum of 2 --> almost like `same` should be function ; same :: a -> [a] to be applied to some doc/String
@@ -271,7 +268,7 @@ instance Show Paragraph where
   show (Paragraph sentences) = intercalate " " $ show <$> sentences
 
 instance Show Sentence where
-  show (Sentence words) = (intercalate " " $ show <$> words) <> "."
+  show (Sentence ws) = (intercalate " " $ show <$> ws) <> "."
 
 instance Show WrittenWord where
   show (WW s) = s
@@ -301,7 +298,7 @@ instance ShowHTML Paragraph where
   showH (Paragraph s) = mconcat $ fmap showH s 
 
 instance ShowHTML Sentence where
-  showH (Sentence words) = intercalate "" (fmap unWord words) <> "."
+  showH (Sentence ws) = intercalate "" (fmap unWord ws) <> "."
   --where
 
 punctuation :: Stream s m Char => ParsecT s u m Char
@@ -367,35 +364,34 @@ sentence :: Stream s m Char => ParsecT s u m Sentence
 sentence = sentenceWhere (const True)
   
 sentenceWhere :: Stream s m Char => ([WrittenWord] -> Bool) ->  ParsecT s u m Sentence
-sentenceWhere test = do
+sentenceWhere testFn = do
   tokens <- eitherP capitalizedWord number >>= \case
     Left word -> do
       eitherP wordSeparator (char '.') >>= \case
-        Right period -> pure [WW word]
+        Right _period -> pure [WW word]
         Left separator -> (WW (word <> separator) :) <$> sentenceTail False
-    Right number -> do
+    Right num -> do
       eitherP wordSeparator (char '.') >>= \case
-        Right period -> pure [WW number]
-        Left separator -> (WW (number <> separator) :) <$> sentenceTail True
+        Right _period -> pure [WW num]
+        Left separator -> (WW (num <> separator) :) <$> sentenceTail True
 
-  toSentence test tokens
+  toSentence testFn tokens
   where
     toSentence :: Stream s m Char => ([WrittenWord] -> Bool) -> [WrittenWord] -> ParsecT s u m Sentence
-    toSentence test words = case test words of
+    toSentence fn ws = case fn ws of
       False -> parserZero
-      True -> pure  $ Sentence words --  Sentence $ intercalate "" (fmap unWord words) <> "."
-    unWord (WW s) = s
+      True -> pure $ Sentence ws
 
 sentenceTail :: Stream s m Char => Bool -> ParsecT s u m [WrittenWord]
 sentenceTail previousWasNumber = do
   token <- case previousWasNumber of
     True -> Left <$> word'
     False -> eitherP word' number 
-  eitherP wordSeparator (char '.') >>= \case    
+  eitherP wordSeparator (char '.') >>= \case
     Left separator -> do
       tokens <- sentenceTail $ isRight token
-      pure $ WW (either id id token <> separator) : tokens 
-    Right period -> pure $ [WW $ either id id token]
+      pure $ WW (either id id token <> separator) : tokens
+    Right _period -> pure $ [WW $ either id id token]
 
 
 -- sentenceTail = \case
@@ -482,9 +478,9 @@ negParseOpeningTag elemOpts = do
   -- _ <- MParsec.manyTill anyToken (char '<' >> elemOpts >> attrsParser attrsSubset) -- the buildElemsOpts [Elem]
   _ <- char '<'
   tag <- some alphaNum -- mkElemtagParser $ Just elemOpts
-  when (elem tag elemOpts) parserZero
-  attrs <- attrsParser []
-  pure $ (tag, fromRight mempty attrs) 
+  when (tag `Prelude.elem` elemOpts) parserZero
+  parsedAttrs <- attrsParser []
+  pure $ (tag, fromRight mempty parsedAttrs) 
 
 textChunk :: Stream s m Char => ParsecT s u m String 
 textChunk = fmap mconcat $ manyTill plainText (try $ openOrCloseTag)
@@ -504,7 +500,7 @@ anyEndTag = do
 anyThingbut :: Stream s m Char => [String] -> ParsecT s u m String
 anyThingbut es = do
   txt <- some alphaNum
-  when (elem txt es) $ parserZero
+  when (txt `Prelude.elem` es) $ parserZero
   pure txt
     
 textChunkIf :: Stream s m Char => (String -> Bool) -> ParsecT s u m String
@@ -582,6 +578,7 @@ removeStyleTags html = (mconcat . catEithers) $ fromRight [] $ parse (divideUp e
 
 
 catEithers :: [Either e a] -> [a]
+catEithers [] = []
 catEithers (x:xs) = case x of
   Right a -> a : catEithers xs
   Left _ -> catEithers xs
@@ -595,7 +592,7 @@ onlyPlainText = fmap (\(ACT strings) -> mconcat $ reverse strings) specialElemPa
   where
     specialElemParser :: Stream s m Char => ParsecT s u m (AccumITextElem String)
     specialElemParser = do
-      (elem', attrs') <- parseOpeningTag (Just ["html"]) []  
+      (elem', _) <- parseOpeningTag (Just ["html"]) []
       (localText, inTex) <- fmap (foldr textOnlyFoldr mempty)
                                 $ (try (string "/>") >> return [])
                                 <|> (try $ innerElemParser' elem')

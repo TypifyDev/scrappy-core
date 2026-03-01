@@ -1,24 +1,22 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MonoLocalBinds #-}
 
 module Scrappy.Scrape where
 
 -- -- Basically just html patterns from testing / courtney market stuff
-import Scrappy.Elem.Types (Elem', innerText')
-import Scrappy.Elem.ElemHeadParse (hrefParser, parseOpeningTag)
+import Scrappy.Elem.ElemHeadParse (parseOpeningTag)
 import Scrappy.Elem.SimpleElemParser (el)
 import Scrappy.Elem.ChainHTML ((</>>))
 import Scrappy.Find (findNaive, findNaiveIO)
-import Scrappy.Links (maybeUsefulUrl)
 import Scrappy.Types
 
 import Control.Monad.Trans.Maybe (MaybeT(..))
 import Control.Monad.IO.Class (MonadIO)
 import Data.Functor.Identity (Identity)
 import Data.Either (fromRight)
-import Data.Maybe (catMaybes, fromMaybe)
-import Text.Parsec (Stream, ParsecT, parse, string, parserZero, anyChar, manyTill, char, many, try, runParserT)
-import Control.Applicative (liftA2) 
+import Data.Maybe (fromMaybe, listToMaybe)
+import Text.Parsec (Stream, ParsecT, parse, string, parserZero, anyChar, manyTill, char, many, try, runParserT) 
 
 type ScraperT a = ParsecT Html () Identity a 
 ---type Html = String
@@ -65,7 +63,7 @@ scrape = runScraperOnHtml
 
 scrapeFirst' :: ScraperT a -> Html -> Maybe a
 scrapeFirst' f h = case scrape f h of
-                    Just (x:xs) -> return x
+                    Just (x:_) -> return x
                     _ -> Nothing 
 
 
@@ -118,7 +116,7 @@ skipToBody = manyTill anyChar (parseOpeningTag (Just ["html"]) [] >> char '>') <
 
 
 runScraperOnHtml1 :: ParsecT String () Identity a -> String -> Maybe a
-runScraperOnHtml1 p = (fmap head) . runScraperOnHtml p
+runScraperOnHtml1 p = (>>= listToMaybe) . runScraperOnHtml p
 
 
 
@@ -166,10 +164,11 @@ runScraperOnHtml1 p = (fmap head) . runScraperOnHtml p
 
 scrapeFirst :: Stream s m Char => ParsecT s u m a -> ParsecT s u m (Maybe a)
 scrapeFirst p = do
-  x <- findNaive p
-  case x of
-    Just (x:_) -> return $ Just x
-    Nothing -> return $ Nothing
+  result <- findNaive p
+  case result of
+    Just (y:_) -> return $ Just y
+    Just [] -> return Nothing
+    Nothing -> return Nothing
 
  
 findCount :: Stream s m Char => ParsecT s u m a -> ParsecT s u m Int

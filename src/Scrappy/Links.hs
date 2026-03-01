@@ -30,18 +30,16 @@ module Scrappy.Links where
 import Control.Monad (join)
 import qualified Network.URI as NURI
 -- TODO(galen): Replace with Network.URI and deprecate Text.URI
-import Text.URI (URI, uriQuery, mkURI, uriPath, unRText, emptyURI, uriScheme, uriAuthority, RTextLabel(..))
+import Text.URI (URI, uriQuery, mkURI, uriPath, unRText, uriScheme)
 import Control.Lens ((^.))
 import qualified Text.URI.Lens as UL
-import Text.Parsec (ParsecT, Stream )
+import Text.Parsec (ParsecT)
 import Data.Functor.Classes (eq1)
 import Data.Map (Map)
-import Data.Either (fromRight, isRight)
-import Data.Maybe (catMaybes, fromJust, fromMaybe)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.List (isSuffixOf, isInfixOf, isPrefixOf)
-import qualified Data.List.NonEmpty as NE (length, last)
-import Data.Text (Text, pack, unpack, splitOn
-                 )
+import qualified Data.List.NonEmpty as NE (last)
+import Data.Text (Text, pack, unpack, splitOn)
 import Data.Char (toLower)
 
 import Data.Aeson.TH (defaultOptions, deriveJSON)
@@ -82,13 +80,14 @@ type RelativeUrl = Url
 
 fixRelativeUrl :: BaseUrl -> Url -> Url
 fixRelativeUrl (Link bUrl) url
-  | url == "" = bUrl 
-  | url == "/" = bUrl 
+  | url == "" = bUrl
+  | url == "/" = bUrl
   | isInfixOf bUrl url = url
-  | last bUrl == '/' && (isPrefixOf "/" url) = bUrl <> (tail url) -- both
-  | last bUrl == '/' && (not $ isPrefixOf "/" url) = bUrl <> url  -- a 
-  | last bUrl /= '/' && (isPrefixOf "/" url) = bUrl <> url -- b 
-  | last bUrl /= '/' && (not $ isPrefixOf "/" url) = bUrl <> "/" <> url -- neither 
+  | last bUrl == '/' && (isPrefixOf "/" url) = bUrl <> (drop 1 url) -- both
+  | last bUrl == '/' && (not $ isPrefixOf "/" url) = bUrl <> url  -- a
+  | last bUrl /= '/' && (isPrefixOf "/" url) = bUrl <> url -- b
+  | last bUrl /= '/' && (not $ isPrefixOf "/" url) = bUrl <> "/" <> url -- neither
+  | otherwise = bUrl <> url  -- fallback case 
 
    --- || ((last bUrl /= '/') && (isPrefixOf "/" url)) = bUrl <> url
 
@@ -107,7 +106,7 @@ type Href = String
 
 
 fixSameSiteURL :: LastUrl -> Href -> Maybe Url
-fixSameSiteURL lastUrl href = undefined
+fixSameSiteURL _lastUrl _href = undefined
 
 
 -- | Generic algorithm for determining full path given last url 
@@ -332,7 +331,7 @@ maybeUsefulNewUrl baseUrl tree url = maybeUsefulUrl baseUrl url >>= maybeNewUrl 
 
 
 urlIsNew :: [(a, Url)] -> HrefURI -> Bool
-urlIsNew [] uri = True
+urlIsNew [] _uri = True
 urlIsNew (branch:tree) uri
   | eq1 (fmap uriPath (mkURI' (uri))) (fmap uriPath (mkURI' (snd branch))) = False
   | otherwise = urlIsNew tree uri
@@ -361,32 +360,31 @@ maybeNewUrl (branch:tree) uri =
 -- | do not contain the base url of the host site
 maybeUsefulUrl :: Link -> Link -> Maybe Link
 maybeUsefulUrl (Link baseUrl) url = do
-  noJSorShit url
-  numberOfQueryParamsIsZero url
-  if isInfixOf baseUrl (renderLink url) then return url else Nothing
+  _ <- noJSorShit url
+  _ <- numberOfQueryParamsIsZero url
+  _ <- if isInfixOf baseUrl (renderLink url) then return url else Nothing
   allowableEndings url
 
   where
     noJSorShit :: Link -> Maybe Link
     noJSorShit link =
-      if (not $ elem True (urlContains link ["javascript", "about", "help", "#"]))
+      if (not $ Prelude.elem True (urlContains link ["javascript", "about", "help", "#"]))
       then Just url
       else Nothing
 
     urlContains :: Link -> [String] -> [Bool]
-    urlContains (Link url) icases = fmap ((flip isInfixOf) (fmap toLower url)) icases
-  
-    allowableEndings url =
-      let lastPath = fromMaybe "" $ getLastPath url
-      in
-        if (elem '.' lastPath)
-        then allowableFile lastPath url -- must be of allowable
-        else Just url
-  
-    allowableFile endPath url =
+    urlContains (Link lnk) icases = fmap ((flip isInfixOf) (fmap toLower lnk)) icases
 
-      if elem True $ fmap (\x -> isSuffixOf x (fmap toLower endPath)) allowed
-      then Just url
+    allowableEndings lnk =
+      let lastPath = fromMaybe "" $ getLastPath lnk
+      in
+        if (Prelude.elem '.' lastPath)
+        then allowableFile lastPath lnk -- must be of allowable
+        else Just lnk
+
+    allowableFile endPath lnk =
+      if Prelude.elem True $ fmap (\x -> isSuffixOf x (fmap toLower endPath)) allowed
+      then Just lnk
       else Nothing
       where allowed = [".aspx", ".html", ".pdf", ".php"]
 
@@ -406,6 +404,7 @@ usefulNewUrls _ _ [] = []
 usefulNewUrls baseUrl tree (link:links) = (maybeUsefulNewUrl baseUrl tree link) : usefulNewUrls baseUrl tree links
 
 usefulUrls :: Link -> [Link] -> [Maybe Link]
+usefulUrls _ [] = []
 usefulUrls baseUrl (link:links) = maybeUsefulUrl baseUrl link : usefulUrls baseUrl links 
 
 numberOfQueryParamsIsZero :: Link -> Maybe String

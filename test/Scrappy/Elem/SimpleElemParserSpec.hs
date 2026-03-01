@@ -26,25 +26,25 @@ spec = do
     it "parses a simple div element" $ do
       let result = parse (el "div" []) "" "<div>content</div>"
       case result of
-        Right elem -> do
-          elTag elem `shouldBe` "div"
-          innerText' elem `shouldBe` "content"
+        Right e -> do
+          elTag e `shouldBe` "div"
+          innerText' e `shouldBe` "content"
         Left err -> expectationFailure $ show err
 
     it "parses an element with text content" $ do
       let result = parse (el "p" []) "" "<p>Hello World</p>"
       case result of
-        Right elem -> do
-          elTag elem `shouldBe` "p"
-          innerText' elem `shouldBe` "Hello World"
+        Right e -> do
+          elTag e `shouldBe` "p"
+          innerText' e `shouldBe` "Hello World"
         Left err -> expectationFailure $ show err
 
     it "parses an element with specific attribute" $ do
       let result = parse (el "a" [("href", "/page")]) "" "<a href=\"/page\">Link</a>"
       case result of
-        Right elem -> do
-          elTag elem `shouldBe` "a"
-          Map.lookup "href" (attrs elem) `shouldBe` Just "/page"
+        Right e -> do
+          elTag e `shouldBe` "a"
+          Map.lookup "href" (attrs e) `shouldBe` Just "/page"
         Left err -> expectationFailure $ show err
 
     it "fails when tag does not match" $ do
@@ -56,16 +56,16 @@ spec = do
     it "parses empty element" $ do
       let result = parse (el "div" []) "" "<div></div>"
       case result of
-        Right elem -> do
-          elTag elem `shouldBe` "div"
-          innerText' elem `shouldBe` ""
+        Right e -> do
+          elTag e `shouldBe` "div"
+          innerText' e `shouldBe` ""
         Left err -> expectationFailure $ show err
 
   describe "elemParser" $ do
     it "matches any element when elemList is Nothing" $ do
       let result = parse (elemParserS Nothing []) "" "<span>text</span>"
       case result of
-        Right elem -> elTag elem `shouldBe` "span"
+        Right e -> elTag e `shouldBe` "span"
         Left err -> expectationFailure $ show err
 
     it "matches only specified elements when elemList is Just [tags]" $ do
@@ -77,15 +77,15 @@ spec = do
     it "captures innerHtmlFull correctly" $ do
       let result = parse (elemParserS (Just ["div"]) []) "" "<div>inner text</div>"
       case result of
-        Right elem -> innerText' elem `shouldBe` "inner text"
+        Right e -> innerText' e `shouldBe` "inner text"
         Left err -> expectationFailure $ show err
 
     it "parses element with multiple attributes" $ do
       let result = parse (elemParserS (Just ["input"]) [("type", Just "text")]) "" "<input type=\"text\" value=\"hello\">"
       case result of
-        Right elem -> do
-          elTag elem `shouldBe` "input"
-          Map.lookup "type" (attrs elem) `shouldBe` Just "text"
+        Right e -> do
+          elTag e `shouldBe` "input"
+          Map.lookup "type" (attrs e) `shouldBe` Just "text"
         Left err -> expectationFailure $ show err
 
   describe "self-closing elements" $ do
@@ -99,31 +99,31 @@ spec = do
     it "parses br element" $ do
       let result = parse (elemParserS (Just ["br"]) []) "" "<br>"
       case result of
-        Right elem -> elTag elem `shouldBe` "br"
+        Right e -> elTag e `shouldBe` "br"
         Left err -> expectationFailure $ show err
 
     it "parses br element with self-closing slash" $ do
       let result = parse (elemParserS (Just ["br"]) []) "" "<br/>"
       case result of
-        Right elem -> elTag elem `shouldBe` "br"
+        Right e -> elTag e `shouldBe` "br"
         Left err -> expectationFailure $ show err
 
     it "parses img element with attributes" $ do
       let result = parse (elemParserS (Just ["img"]) [("src", Just "test.jpg")]) "" "<img src=\"test.jpg\" alt=\"test\">"
       case result of
-        Right elem -> do
-          elTag elem `shouldBe` "img"
-          Map.lookup "src" (attrs elem) `shouldBe` Just "test.jpg"
+        Right e -> do
+          elTag e `shouldBe` "img"
+          Map.lookup "src" (attrs e) `shouldBe` Just "test.jpg"
         Left err -> expectationFailure $ show err
 
   describe "nested elements" $ do
     it "captures nested element as inner text" $ do
       let result = parse (el "div" []) "" "<div><span>nested</span></div>"
       case result of
-        Right elem -> do
-          elTag elem `shouldBe` "div"
+        Right e -> do
+          elTag e `shouldBe` "div"
           -- Inner HTML includes the nested span
-          innerText' elem `shouldContain` "nested"
+          innerText' e `shouldContain` "nested"
         Left err -> expectationFailure $ show err
 
   describe "sibling elements with whitespace" $ do
@@ -133,12 +133,12 @@ spec = do
       let html = "<ul>\n  <li>A</li>\n  <li>B</li>\n  <li>C</li>\n</ul>"
       let result = parse (elemParserS (Just ["ul"]) []) "" html
       case result of
-        Right elem -> do
-          elTag elem `shouldBe` "ul"
+        Right e -> do
+          elTag e `shouldBe` "ul"
           -- All three li elements should be captured in the inner text
-          innerText' elem `shouldContain` "<li>A</li>"
-          innerText' elem `shouldContain` "<li>B</li>"
-          innerText' elem `shouldContain` "<li>C</li>"
+          innerText' e `shouldContain` "<li>A</li>"
+          innerText' e `shouldContain` "<li>B</li>"
+          innerText' e `shouldContain` "<li>C</li>"
         Left err -> expectationFailure $ show err
 
     it "parses sibling elements using someHtml" $ do

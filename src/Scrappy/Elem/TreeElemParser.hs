@@ -1,37 +1,26 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TupleSections #-}
 
 module Scrappy.Elem.TreeElemParser where
 
-import Control.Monad.IO.Class
-
-import Scrappy.Elem.ElemHeadParse (parseOpeningTag, hrefParser', parseOpeningTagDesc, mkAttrsDesc, attrParser)
+import Scrappy.Elem.ElemHeadParse (parseOpeningTag, parseOpeningTagDesc)
 import Scrappy.Elem.Types (Elem, Attrs, ElemHead, TreeHTML(TreeHTML), HTMLMatcher (IText, Element, Match)
-                  , InnerTextHTMLTree(InnerTextHTMLTree), innerTree, innerText, matches, GroupHtml
-                  , Elem', TreeIndex, attrs, elTag, ShowHTML, showH, _innerTree', matches'
-                  , ElementRep, mkGH, innerText', _innerText, _matches, foldFuncTrup
-                  , UrlPagination(..), enoughMatchesTree, selfClosingTextful, endTag)
+                  , GroupHtml, TreeIndex, attrs, elTag, ShowHTML, _innerTree', matches'
+                  , mkGH, foldFuncTrup, selfClosingTextful, endTag)
 
-import Scrappy.Elem.ChainHTML (someHtml, manyHtml, nl)
-import Scrappy.Elem.SimpleElemParser (elemParser)
+import Scrappy.Elem.ChainHTML (nl)
 import Scrappy.Find (findNaive)
 
 import Control.Monad (when)
-import Control.Applicative (Alternative, liftA2, many, (<|>), some)
-import Text.Parsec (Stream, ParsecT, anyChar, try, parserZero, parserFail, string, parse
-                   , char, noneOf, option, space, alphaNum, notFollowedBy, (<?>), optional, manyTill)
-import qualified Data.Map as Map (Map, toList, fromList, adjust) 
+import Control.Applicative (Alternative, many, (<|>), some)
+import Text.Parsec (Stream, ParsecT, anyChar, try, parserZero, parserFail, string
+                   , char, notFollowedBy, (<?>), manyTill)
+import qualified Data.Map as Map (toList)
 import Data.Graph (Tree (Node), Forest)
 import Data.Tree (rootLabel)
-import Text.URI as URI
-import Data.Char (digitToInt)
-import Data.Maybe (fromMaybe, fromJust)
-import Data.List
-import Data.Text (Text, splitOn)
+import Data.Maybe (fromMaybe)
 
 
 skipManyTill :: Alternative m => m a -> m end -> m end
@@ -89,22 +78,22 @@ treeElemParser' :: (Stream s m Char, ShowHTML a) =>
                -> [(String, Maybe String)]
                -> ParsecT s u m (TreeHTML a)
 treeElemParser'  elemOpts matchh attrsSubset = do
- (elem', attrs') <- parseOpeningTag elemOpts attrsSubset
- case elem elem' selfClosing of
+ (el', attrs') <- parseOpeningTag elemOpts attrsSubset
+ case el' `Prelude.elem` selfClosing of
    True -> do
-      (try (string ">") <|> string "/>")
+      _ <- try (string ">") <|> string "/>"
       case matchh of
-        Nothing ->  return $ TreeHTML elem' attrs' mempty mempty []
+        Nothing ->  return $ TreeHTML el' attrs' mempty []
         Just _ -> parserZero
 
-     -- ((try string ">") <|> string "/>") >> return TreeHTML elem' attrs' mempty mempty mempty
+     -- ((try string ">") <|> string "/>") >> return TreeHTML el' attrs' mempty mempty mempty
    False -> do
      -- (inText, matchBook, treees) <- inerTreeElemParser
      rawMatchers <- (try (string "/>") >> return [])
-                    <|> (try $ innerElemParser2 elem' matchh)
+                    <|> (try $ innerElemParser2 el' matchh)
                     <|> (selfClosingTextful matchh)
-     let (inText, matchBook, _treees) = foldr foldFuncTrup mempty rawMatchers
-     return $ TreeHTML elem' attrs' matchBook inText rawMatchers
+     let (_inText, matchBook, _treees) = foldr foldFuncTrup mempty rawMatchers
+     return $ TreeHTML el' attrs' matchBook rawMatchers
 
 -------------------------------------------------------------------------------------------------------------------
 
@@ -117,10 +106,10 @@ innerTreeElemParser :: (ShowHTML a, Stream s m Char) =>
                        Elem
                     -> Maybe (ParsecT s u m a)
                     -> ParsecT s u m (String, [a], [Tree ElemHead])
-innerTreeElemParser elem' matchh = do
+innerTreeElemParser el' matchh = do
   fmap (foldr foldFuncTrup mempty)
     $ (try (string "/>") >> return [])
-    <|> (try $ innerElemParser2 elem' matchh)
+    <|> (try $ innerElemParser2 el' matchh)
     <|> (selfClosingTextful matchh)
 -- then i apply this to all leaves of the Map
 
@@ -155,15 +144,15 @@ treeElemParserSpecific :: (Stream s m Char, ShowHTML a) =>
                        -> [(String, String)]
                        -> SubTree ElemHead
                        -> ParsecT s u m (TreeHTML a)
-treeElemParserSpecific match elem' attrs' subTree = do
-  (tag, attrsOut) <- parseOpeningTagDesc (Just [elem']) attrs'
-  char '>'
-  (matchBook, inText, _treees) <- innerParserSpecific match tag subTree
-  return $ TreeHTML tag attrsOut matchBook inText []  -- TODO: propagate rawInner through innerParserSpecific
+treeElemParserSpecific match el' attrs' subTree = do
+  (tag, attrsOut) <- parseOpeningTagDesc (Just [el']) attrs'
+  _ <- char '>'
+  (matchBook, _inText, _treees) <- innerParserSpecific match tag subTree
+  return $ TreeHTML tag attrsOut matchBook []  -- TODO: propagate rawInner through innerParserSpecific
 
 validateGPR :: [Many (Tree ElemHead)] -> ParsecT s u m [HTMLMatcher TreeHTML a]
 validateGPR manyElHeads =
-  if length (filter (\case {One a -> True; _ -> False}) manyElHeads) == 0 then return []
+  if length (filter (\case {One _ -> True; _ -> False}) manyElHeads) == 0 then return []
   else parserFail "promised elements not found"
 
 -- We allow attrs to be any then check, but also avoid unnceccessarily parsing attrs
@@ -205,8 +194,8 @@ htmlGenParserRepeat elemTag match manyElHeadss = {-parsesTreeHs-}
     -- [] -> fmap ((flip (:) []) . IText . fst) (manyTill_ (htmlGenParserFlex match) (endTag elemTag))
 
     [] -> do
-      (htMMers, _) <-  manyTill_ (htmlGenParserFlex match) (endTag elemTag)
-      if length (filter (\case {Element _ -> True; _ -> False}) htMMers) == 0 -- AND loose == False 
+      (htMMers, _) <- manyTill_ (htmlGenParserFlex match) (endTag elemTag)
+      if null (filter (\case {Element _ -> True; _ -> False}) htMMers) -- AND loose == False 
         then
         return htMMers
         else
@@ -288,22 +277,22 @@ treeElemParserSpecificContinuous match manyElHeads = do
   let
     -- If we take up until the 1st (One a) then we know that it should succeed in all valid cases or fail
     elSet :: [Many (Tree ElemHead)]
-    elSet = takeTill (\case { One a -> True; _ -> False}) manyElHeads
+    elSet = takeTill (\case { One _ -> True; _ -> False}) manyElHeads
 
 
     
-  (e,attrs) <- parseOpeningTag (Just $ fmap (fst . rootLabel . fromMany) elSet) []
-      
-  (innerForest, outputStack) <- tryElHeads (e,attrs) elSet   
+  (e,parsedAttrs) <- parseOpeningTag (Just $ fmap (fst . rootLabel . fromMany) elSet) []
+
+  (innerForest, outputStack) <- tryElHeads (e,parsedAttrs) elSet
   --  at this point in the case where we have parsed an opening tag we have two possibilities
     --  manyElHeads = [] | x:xs
     --  [] -> then why do we have an opening tag? this should have been either an IText or the endTag
-  
-  (m, inTx, _inTr) <- innerParserSpecific match e innerForest
+
+  (m, _inTx, _inTr) <- innerParserSpecific match e innerForest
   let
     manyElHeads' :: [Many (Tree ElemHead)]
     manyElHeads' = drop ((length manyElHeads) - (length outputStack)) manyElHeads
-  return $ (,) manyElHeads' (TreeHTML e attrs m inTx [])  -- TODO: propagate rawInner
+  return $ (,) manyElHeads' (TreeHTML e parsedAttrs m [])  -- TODO: propagate rawInner
 
 --------------------------------------------------------------------------------------------------------------------
 --------------------------------------------------------------------------------------------------------------------
@@ -319,7 +308,7 @@ treeElemParserContains match manyElHeads = do
   (e,ats) <- parseOpeningTag Nothing []
   -- char '>'
   let
-    elSet = takeTill (\case { One a -> True; _ -> False}) manyElHeads
+    elSet = takeTill (\case { One _ -> True; _ -> False}) manyElHeads
     -- forestNStack = tryElHeads' elAttrs elSet
   case tryElHeads' (e, ats) elSet of
     Right (innerForest, outputStack) -> do
@@ -329,24 +318,24 @@ treeElemParserContains match manyElHeads = do
       if innerForest == []
         then -- this can be selfclosing
         do
-          case elem e selfClosing of
+          case e `Prelude.elem` selfClosing of
             True -> do
-              (try (string ">") <|> string "/>")
-              return $ (,) manyElHeads' (TreeHTML e ats mempty mempty [])
+              _ <- (try (string ">") <|> string "/>")
+              return $ (,) manyElHeads' (TreeHTML e ats mempty [])
             False -> do
-              (m, inTx, _inTr) <- innerParserContains match e innerForest
-              return $ (,) manyElHeads' (TreeHTML e ats m inTx [])  -- TODO: propagate rawInner
+              (m, _inTx, _inTr) <- innerParserContains match e innerForest
+              return $ (,) manyElHeads' (TreeHTML e ats m [])  -- TODO: propagate rawInner
         else -- this cannot be selfClosing
         do
-          (m, inTx, _inTr) <- innerParserContains match e innerForest
-          return $ (,) manyElHeads' (TreeHTML e ats m inTx [])  -- TODO: propagate rawInner
+          (m, _inTx, _inTr) <- innerParserContains match e innerForest
+          return $ (,) manyElHeads' (TreeHTML e ats m [])  -- TODO: propagate rawInner
 
       -- string "/>" >> return (mempty, mempty, mempty) <|> string ">" >> innerParserContains 
 
       
-    Left someError -> do
-      (inText, matchBook, _treees) <- innerTreeElemParser e match
-      return $ (,) manyElHeads (TreeHTML e ats matchBook inText [])  -- TODO: propagate rawInner 
+    Left _someError -> do
+      (_inText, matchBook, _treees) <- innerTreeElemParser e match
+      return $ (,) manyElHeads (TreeHTML e ats matchBook [])  -- TODO: propagate rawInner 
     
           
    -- ParsecT s u m ([a], String, [Tree ElemHead]) 
@@ -368,7 +357,7 @@ htmlGenParserContains elemTag match manyElHeadss = {-parsesTreeHs-}
                >>= (\(sM, a) -> fmap ((Element a):) (htmlGenParserContains elemTag match sM)))
       <|> liftA2 (:) (fmap (IText . (:[])) (try $ specificChar' elemTag)) (htmlGenParserContains elemTag match manyElHeads)
       <|> (endTag elemTag
-           >> case length (filter (\case {One a -> True; _ -> False}) manyElHeadss) == 0 of
+           >> case length (filter (\case {One _ -> True; _ -> False}) manyElHeadss) == 0 of
                 True -> return []
                 False -> parserFail $ "still havent yielded " <> show manyElHeadss) 
 
@@ -386,12 +375,12 @@ innerParserContains :: (Stream s m Char, ShowHTML a) =>
                     -> SubTree ElemHead
                     -> ParsecT s u m ([a], String, [Tree ElemHead])
 innerParserContains match tag subTree =
-  case elem tag selfClosing of
+  case tag `Prelude.elem` selfClosing of
     True -> if not $ null subTree then undefined else do
-      (try (string ">") <|> string "/>")
+      _ <- (try (string ">") <|> string "/>")
       return (mempty, mempty, mempty)
     False -> do
-      char '>'
+      _ <- char '>'
       x <- htmlGenParserContains tag match (reverse $ groupify subTree [])
       let
         -- | need to ensure all the trees are in order
@@ -407,10 +396,10 @@ similarTreeH :: (Stream s m Char, ShowHTML a)
              -> ParsecT s u m (TreeHTML a)
 similarTreeH matchh treeH = do
   (e,at) <- parseOpeningTag (Just $ [elTag treeH]) (((fmap . fmap) Just) . Map.toList $ attrs treeH)
-  char '>'
+  _ <- char '>'
   rawMatchers <- htmlGenParserContains e matchh (groupify (_innerTree' treeH) [])
-  let (inTx, m, _inTr) = foldr foldFuncTrup mempty rawMatchers
-  return $ TreeHTML e at m inTx rawMatchers
+  let (_inTx, m, _inTr) = foldr foldFuncTrup mempty rawMatchers
+  return $ TreeHTML e at m rawMatchers
   
   -- treeElemParserContains matchh (elTag treeH) (Map.toList $ attrs treeH) (_innerTree' treeH)
   
@@ -494,11 +483,11 @@ innerParserSpecific :: (Stream s m Char, ShowHTML a) =>
                        Maybe (ParsecT s u m a)
                     -> Elem
                     -> SubTree ElemHead
-                    -> ParsecT s u m ([a], String, [Tree ElemHead]) 
+                    -> ParsecT s u m ([a], String, [Tree ElemHead])
 innerParserSpecific match tag subTree =
-  case elem tag selfClosing of
+  case tag `Prelude.elem` selfClosing of
     True -> if not $ null subTree then undefined else do
-      (try (string ">") <|> string "/>")
+      _ <- (try (string ">") <|> string "/>")
       return (mempty, mempty, mempty)
     False -> do 
       -- char '>'
@@ -658,16 +647,16 @@ table = htmlGroup (Just ["tr"]) Nothing []
 
 
 -- | This is all I actually need , no need for recursion here, since thats already done in top level func
-{-# DEPRECATED multiTreeElemHeadParser "use specificContinuous style functions" #-} 
+{-# DEPRECATED multiTreeElemHeadParser "use specificContinuous style functions" #-}
 multiTreeElemHeadParser :: (Stream s m Char, ShowHTML a) =>
                           ParsecT s u m a
                        -> Many (Tree ElemHead)
                        -> ParsecT s u m [HTMLMatcher TreeHTML a]
 multiTreeElemHeadParser match mTree = case mTree of
-  Many (Node (elem, attrs) subTree) ->
-    (fmap . fmap) Element (many (try $ treeElemParserSpecific (Just match) elem (Map.toList attrs) subTree ))
-  One (Node (elem, attrs) subTree) ->
-    treeElemParserSpecific (Just match) elem (Map.toList attrs) subTree >>= return . flip (:) [] . Element
+  Many (Node (el', at') subTree) ->
+    (fmap . fmap) Element (many (try $ treeElemParserSpecific (Just match) el' (Map.toList at') subTree ))
+  One (Node (el', at') subTree) ->
+    treeElemParserSpecific (Just match) el' (Map.toList at') subTree >>= return . flip (:) [] . Element
                                                                         -- like return . (\x -> x :[])
 
 
@@ -826,13 +815,14 @@ fromMany (Many a) = a
 
 
 -- Doesnt change the structure of the page at all just how text is styled like MS word stuff
+stylingTags :: [Elem]
 stylingTags = ["abbr", "b", "big", "acronym", "dfn", "em", "font", "i", "mark", "q", "small"] -- , "strong"]
 
--- | Just gives the inners 
-stylingElem :: Stream s m Char => ParsecT s u m String 
+-- | Just gives the inners
+stylingElem :: Stream s m Char => ParsecT s u m String
 stylingElem = do
   (e,_) <- parseOpeningTag (Just stylingTags) []
-  char '>'
+  _ <- char '>'
   fmap fst $ manyTill_ anyChar (endTag e)
   
 
@@ -907,8 +897,8 @@ nodeToTreeElemExpr :: (Stream s m Char, ShowHTML a) =>
                       Tree ElemHead
                    -> ParsecT s u m a
                    -> ParsecT s u m (TreeHTML a)
-nodeToTreeElemExpr (Node (elem, attrs) subTree) match =
-  treeElemParserSpecific (Just match) elem (Map.toList attrs) subTree
+nodeToTreeElemExpr (Node (el', at') subTree) match =
+  treeElemParserSpecific (Just match) el' (Map.toList at') subTree
 
 
 
@@ -952,6 +942,7 @@ findAllSpaceMutExGroups = findNaive anyHtmlGroup
 
 
 
+findAllMutExGroups' :: a
 findAllMutExGroups' = undefined -- prime in name until renaming errors complete
 -- deals with cases where attr:selected="true" exists since there will be two subgroups that
 -- require concatenations

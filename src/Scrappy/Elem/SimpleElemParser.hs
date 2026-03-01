@@ -4,25 +4,20 @@
 
 module Scrappy.Elem.SimpleElemParser where
 
-import Scrappy.Elem.Types
+import Scrappy.Elem.Types hiding (f)
 
 import Scrappy.Elem.ElemHeadParse (parseOpeningTag, parseOpeningTagWhere)
 import Scrappy.Links (LastUrl)
 
 import Scrappy.Types -- for witherable instance
 
-import Control.Monad (when)  
-import Control.Applicative (Alternative, liftA2, some, (<|>))
+import Control.Monad (when)
+import Control.Applicative (Alternative, some, (<|>))
 --import Witherable (mapMaybe)
 --import Text.Megaparsec as MParsec (eitherP, some, manyTill)
 import Text.Parsec (ParsecT, Stream, string, try, parserZero, anyChar, char, optional, anyToken, parserFail
-                   , many, space, manyTill)
-import Text.URI (URI, render)
-import Data.Text (Text, unpack)
-import Data.Map (Map, toList)
+                   , manyTill)
 import Data.Maybe (fromMaybe)
-
-import Control.Monad.IO.Class
 
 -- TODO(galen): antiElemParser --- inner matches must be 0 ... maybe doesnt match any parameter 
 
@@ -63,48 +58,48 @@ elemParser :: (ShowHTML a, Stream s m Char) =>
            -> Maybe (ParsecT s u m a)
            -> [(String, Maybe String)]
            -> ParsecT s u m (Elem' a)
-elemParser elemList innerSpec attrs = do
+elemParser elemList innerSpec attrSpec = do
   -- liftIO $ print "hey"
-  (elem', attrs') <- parseOpeningTag elemList attrs 
+  (elem', attrs') <- parseOpeningTag elemList attrSpec
   -- we should now read the elem' to see if in list of self-closing tags
   -- TODO(galen): What about when the self closing tag actually doesnt?
-  case elem elem' selfClosing of
+  case elem' `Prelude.elem` selfClosing of
     True -> do
-      (try (string ">") <|> string "/>")
+      _ <- try (string ">") <|> string "/>"
       case innerSpec of
-        Nothing -> return $ Elem' elem' attrs' mempty mempty 
-        Just _ -> parserZero 
+        Nothing -> return $ Elem' elem' attrs' mempty mempty
+        Just _ -> parserZero
     False -> do
-      (asString, matches) <- fmap (foldr foldFuncTup mempty)  -- this cant be where we do "/>" if we parse ">" in parseOpeningTag
+      (asString, matchList) <- fmap (foldr foldFuncTup mempty)  -- this cant be where we do "/>" if we parse ">" in parseOpeningTag
         $ (try (string "/>") >> return [])
         <|> (try $ innerElemParser elem' innerSpec) -- need to be sure that we have exhausted looking for an end tag, then we can do the following safely
         <|> (selfClosingTextful innerSpec)
-      return $ Elem' elem' attrs' matches asString
+      return $ Elem' elem' attrs' matchList asString
 
 
 -- | Generic interface for building Html element patterns where we do not differentiate based on whats inside
--- | for control of allowable inner html patterns, see ChainHTML and/or TreeElemParser  
+-- | for control of allowable inner html patterns, see ChainHTML and/or TreeElemParser
 elemParserWhere :: (ShowHTML a, Stream s m Char) =>
                    Maybe [Elem]
                 -> Maybe (ParsecT s u m a)
                 -> String -> (String -> Bool) -- GOAL: -> [(String, String -> Bool)]
                 -- ^ An attr and a predicate
                 -> ParsecT s u m (Elem' a)
-elemParserWhere elemList innerSpec attr pred = do
-  (elem', attrs') <- parseOpeningTagWhere elemList attr pred
+elemParserWhere elemList innerSpec attr predicate = do
+  (elem', attrs') <- parseOpeningTagWhere elemList attr predicate
   -- we should now read the elem' to see if in list of self-closing tags
-  case elem elem' selfClosing of
+  case elem' `Prelude.elem` selfClosing of
     True -> do
-      (try (string ">") <|> string "/>")
+      _ <- try (string ">") <|> string "/>"
       case innerSpec of
-        Nothing -> return $ Elem' elem' attrs' mempty mempty 
-        Just _ -> parserZero 
+        Nothing -> return $ Elem' elem' attrs' mempty mempty
+        Just _ -> parserZero
     False -> do
-      (asString, matches) <- fmap (foldr foldFuncTup mempty)  -- this cant be where we do "/>" if we parse ">" in parseOpeningTag
+      (asString, matchList) <- fmap (foldr foldFuncTup mempty)  -- this cant be where we do "/>" if we parse ">" in parseOpeningTag
         $ (try (string "/>") >> return [])
         <|> (try $ innerElemParser elem' innerSpec) -- need to be sure that we have exhausted looking for an end tag, then we can do the following safely
         <|> (selfClosingTextful innerSpec)
-      return $ Elem' elem' attrs' matches asString
+      return $ Elem' elem' attrs' matchList asString
 
 
 
@@ -131,16 +126,16 @@ clickableHref' innerPat booly cUrl = do
 -- instance Monad Elem' where 
 
 sameElTag :: (ShowHTML a, Stream s m Char) => Elem -> Maybe (ParsecT s u m a) -> ParsecT s u m (Elem' a)
-sameElTag elem parser = elemParser (Just [elem]) parser []
-  
-  -- innerMatches el 
+sameElTag tagName parser = elemParser (Just [tagName]) parser []
+
+  -- innerMatches el
   -- return $ (elemToStr el, Match $ innerMatches el)  -- allowed to return a String or Match a
 
 -- future concern for foldFuncMatchlist where Elem ~~ [] ; both of kind * -> *
 matchesInSameElTag :: (ShowHTML a, Stream s m Char) => Elem -> Maybe (ParsecT s u m a) -> ParsecT s u m [a]
-matchesInSameElTag elem parser = do
-  el <- elemParser (Just [elem]) parser [] 
-  return $ (matches' el)  -- allowed to return a String or Match a
+matchesInSameElTag tagName parser = do
+  parsedEl <- elemParser (Just [tagName]) parser []
+  return $ matches' parsedEl  -- allowed to return a String or Match a
 
 -- | Might be worth it to do again with findNextMatch func
   -- this would open up ability to return multiple matches inside of a given element
@@ -256,41 +251,41 @@ selfClosing = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link
 
 elSelfC :: Stream s m Char => Maybe [Elem] -> [(String, Maybe String)] -> ParsecT s u m (Elem' a)
 elSelfC elemOpts attrsSubset = do
-  (tag, attrs) <- parseOpeningTag elemOpts attrsSubset
-  return $ Elem' tag attrs mempty mempty 
+  (tag, parsedAttrs) <- parseOpeningTag elemOpts attrsSubset
+  return $ Elem' tag parsedAttrs mempty mempty
 
 elSelfClosing :: Stream s m Char => Maybe [Elem] -> Maybe (ParsecT s u m a) -> [(String, Maybe String)] -> ParsecT s u m (Elem' a)
 elSelfClosing elemOpts innerSpec attrsSubset = do
-  (tag, attrs) <- parseOpeningTag elemOpts attrsSubset
+  (tag, parsedAttrs) <- parseOpeningTag elemOpts attrsSubset
   case innerSpec of
     Just _ -> parserZero
-    Nothing -> return $ Elem' tag attrs mempty mempty 
+    Nothing -> return $ Elem' tag parsedAttrs mempty mempty 
 
 elemWithBody :: (ShowHTML a, Stream s m Char) =>
               Maybe [Elem]
            -> Maybe (ParsecT s u m a)
            -> [(String, Maybe String)]
            -> ParsecT s u m (Elem' a)
-elemWithBody elemList innerSpec attrs = do
-  e <- elemParserInternal elemList innerSpec attrs
+elemWithBody elemList innerSpec attrSpec = do
+  e <- elemParserInternal elemList innerSpec attrSpec
   when (length (matches' e) < (case innerSpec of { Nothing -> 0; _ -> 1 })) (parserFail "not enough matches")
   return e
-  
+
 elemParserInternal :: (ShowHTML a, Stream s m Char) =>
               Maybe [Elem]
            -> Maybe (ParsecT s u m a)
            -> [(String, Maybe String)]
            -> ParsecT s u m (Elem' a)
-elemParserInternal elemList innerSpec attrs = do
-  (elem', attrs') <- parseOpeningTag elemList attrs
+elemParserInternal elemList innerSpec attrSpec = do
+  (elem', attrs') <- parseOpeningTag elemList attrSpec
   -- we should now read the elem' to see if in list of self-closing tags
   -- case elem elem' selfClosing of
-    -- True -> return Elem' elem' attrs' 
-  (asString, matches) <- fmap (foldr foldFuncTup mempty)  -- this cant be where we do "/>" if we parse ">" in parseOpeningTag
+    -- True -> return Elem' elem' attrs'
+  (asString, matchList) <- fmap (foldr foldFuncTup mempty)  -- this cant be where we do "/>" if we parse ">" in parseOpeningTag
     $ (try (string "/>") >> return [])
     <|> (try $ innerElemParser elem' innerSpec) -- need to be sure that we have exhausted looking for an end tag, then we can do the following safely
     <|> (selfClosingTextful innerSpec)
-  return $ Elem' elem' attrs' matches asString
+  return $ Elem' elem' attrs' matchList asString
 
 
 -- elemParserInternalV2 :: (ShowHTML a, Stream s m Char) =>
@@ -342,13 +337,14 @@ innerElemParser eTag innerSpec = char '>'
                                               
 
 -- Doesnt change the structure of the page at all just how text is styled like MS word stuff
+stylingTags :: [String]
 stylingTags = ["abbr", "b", "big", "acronym", "dfn", "em", "font", "i", "mark", "q", "small", "strong"]
 
--- | Just gives the inners 
-stylingElem :: Stream s m Char => ParsecT s u m String 
+-- | Just gives the inners
+stylingElem :: Stream s m Char => ParsecT s u m String
 stylingElem = do
   (e,_) <- parseOpeningTag (Just stylingTags) []
-  char '>'
+  _ <- char '>'
   fmap fst $ manyTill_ anyChar (endTag e)
   
 -- f :: ([a], [b], [c]) -> Elem' a
@@ -444,51 +440,51 @@ parseInnerHTMLAndEndTag :: (Stream s m Char) =>
                            Elem
                         -> Maybe (ParsecT s u m String)
                         -> ParsecT s u m (InnerTextResult String)
-parseInnerHTMLAndEndTag elem innerPattern = do
+parseInnerHTMLAndEndTag tagName innerPattern = do
 
-  let f :: Stream s m Char => Maybe (ParsecT s u m String) -> ParsecT s u m String
-      f x = case x of
+  let getPattern :: Stream s m Char => Maybe (ParsecT s u m String) -> ParsecT s u m String
+      getPattern x = case x of
               Just pat -> pat
               Nothing -> string ""
 
-      sameElTag :: Stream s m Char => ParsecT s u m String
-      sameElTag = do
-        el <- elemParserOld (Just [elem]) Nothing []
-        return $ showH el
+      parseElTag :: Stream s m Char => ParsecT s u m String
+      parseElTag = do
+        parsedEl <- elemParserOld (Just [tagName]) Nothing []
+        return $ showH parsedEl
 
-      p :: Stream s m Char => ParsecT s u m String 
+      p :: Stream s m Char => ParsecT s u m String
       p = do
-        a <- anyToken
-        return (a : [])
+        c <- anyToken
+        return (c : [])
 
       baseParser :: Stream s m Char => Maybe (ParsecT s u m String) -> ParsecT s u m String -> ParsecT s u m (InnerTextResult String)
       baseParser innerPat endParse = do
         _ <- char '>'
-        (pre, patternFound) <- manyTill_ (try sameElTag <|> p) (f innerPat)
-        (post, _) <- manyTill_  (try sameElTag <|> p) endParse
+        (pre, patternFound) <- manyTill_ (try parseElTag <|> p) (getPattern innerPat)
+        (post, _) <- manyTill_  (try parseElTag <|> p) endParse
 
         return $ InnerTextResult { _matchesITR = [patternFound]
                                  , _fullInner = mconcat pre <> patternFound <> mconcat post }
-  
+
       anyTagInner :: Stream s m Char => Maybe (ParsecT s u m String) -> ParsecT s u m (InnerTextResult String)
       anyTagInner innerP = baseParser innerP (try (char '<'
-                                                   >> (optional (char '/'))
+                                                   >> optional (char '/')
 ----------------------------------------------------DOES THIS ACTUALLY WORK BELOW?--------------------
-                                                   >> some anyChar -- end tag 
+                                                   >> some anyChar -- end tag
                                                    >> (string " " <|> string ">")))
 
       normal :: Stream s m Char => Maybe (ParsecT s u m String) -> ParsecT s u m (InnerTextResult String)
-      normal innerP = baseParser innerP (try (string ("</" <> elem <> ">")))
-      
+      normal innerP = baseParser innerP (try (string ("</" <> tagName <> ">")))
+
 
   x <- eitherP (try (string "/>")) (normal innerPattern <|> anyTagInner innerPattern)
   case x of
-     Left  a ->
+     Left  _ ->
        case innerPattern of
-         Just a -> parserZero
+         Just _ -> parserZero
          Nothing ->
            pure InnerTextResult { _matchesITR = [], _fullInner = "" }
-         
+
      Right b -> return b
      
   -- Note: we can parse these better with eitherP
@@ -514,9 +510,9 @@ elemParserOld :: (Stream s m Char) =>
            -> Maybe (ParsecT s u m String)
            -> [(String, Maybe String)]
            -> ParsecT s u m (Elem' String)
-elemParserOld elemList innerSpec attrs = do
-  (elem', attrs') <- parseOpeningTag elemList attrs
-  --note that at this point, there is a set elem' to match  
+elemParserOld elemList innerSpec attrSpec = do
+  (elem', attrs') <- parseOpeningTag elemList attrSpec
+  --note that at this point, there is a set elem' to match
   inner <- parseInnerHTMLAndEndTag elem' innerSpec
   return $ Elem' elem' attrs' (_matchesITR inner) (_fullInner inner)
 -- | Attrs should really be returned as a map

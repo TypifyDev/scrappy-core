@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MonoLocalBinds #-}
 
 module Scrappy.Find where
 
@@ -7,9 +8,8 @@ module Scrappy.Find where
 --import Scrappy.Types (ScrapeFail(..))
 
 import Control.Monad.IO.Class
-import Text.Parsec (ParsecT, ParseError, Parsec, Stream, parse, eof, anyChar, (<|>), try, parserZero, anyChar
-                   , many) 
-import Data.Text (Text)
+import Text.Parsec (ParsecT, ParseError, Parsec, Stream, parse, eof, anyChar, (<|>), try, parserZero
+                   , many)
 import Data.Functor.Identity (Identity)
 import Data.Either (fromRight)
 import Scrappy.Types (ScrapeFail(..))
@@ -46,7 +46,7 @@ findIO parser = do
   x <- (try (baseParser parser)) <|> givesNothing <|> endStream
   liftIO $ print x
   case x of
-    Right a -> fmap (x :) (find parser)
+    Right _ -> fmap (x :) (find parser)
     Left Eof -> return []
     Left NonMatch -> find parser
 
@@ -54,8 +54,8 @@ findIO parser = do
 -- givesNothing :: ParsecT e s m (Either ScrapeFail a) 
 -- givesNothing = Left NonMatch <$ anyChar
 
-findSequential :: Stream s m Char => [ParsecT s u m a] -> ParsecT s u m [Either ScrapeFail a] 
-findSequential parsers = undefined -- builds off findUntilMatch
+findSequential :: Stream s m Char => [ParsecT s u m a] -> ParsecT s u m [Either ScrapeFail a]
+findSequential _parsers = undefined -- builds off findUntilMatch
 
 findSequential2 :: Stream s m Char => (ParsecT s u m a, ParsecT s u m b) -> ParsecT s u m (a,b)
 findSequential2 (a,b) = do
@@ -93,12 +93,12 @@ findUntilMatch parser = do
 
 
       
--- -- Note: List will be backwards as is 
+-- -- Note: List will be backwards as is
 find :: Stream s m Char => ParsecT s u m a -> ParsecT s u m [Either ScrapeFail a]
 find parser = do
   x <- (try (baseParser parser)) <|> givesNothing <|> endStream
   case x of
-    Right a -> fmap (x :) (find parser)
+    Right _ -> fmap (x :) (find parser)
     Left Eof -> return []
     Left NonMatch -> find parser
 -- return (x:xs)
@@ -108,25 +108,25 @@ streamEdit :: ParsecT String () Identity a -> (a -> String) -> String -> String
 streamEdit p f src = fromRight undefined $ parse (try $ findEdit f p) "" src
 
 
--- -- Note: List will be backwards as is 
-findEdit :: Stream String m Char => (a -> String) -> ParsecT String u m a -> ParsecT String u m String 
+-- -- Note: List will be backwards as is
+findEdit :: Stream String m Char => (a -> String) -> ParsecT String u m a -> ParsecT String u m String
 findEdit f parser = do
-  let endStream = try eof >> (return EOF)
-  x <- ((Edit . f) <$> (try parser)) <|> (Carry <$> anyChar) <|> endStream
+  let endOfStream = try eof >> (return EOF)
+  x <- ((Edit . f) <$> (try parser)) <|> (Carry <$> anyChar) <|> endOfStream
   case x of
-    Edit str -> fmap (str <>) (findEdit f parser) 
-    Carry chr -> fmap ([chr] <>) (findEdit f parser) 
+    Edit str -> fmap (str <>) (findEdit f parser)
+    Carry chr -> fmap ([chr] <>) (findEdit f parser)
     EOF -> return [] 
 
 
--- -- Note: List will be backwards as is 
-editFirst :: Stream String m Char => (a -> String) -> ParsecT String u m a -> ParsecT String u m String 
+-- -- Note: List will be backwards as is
+editFirst :: Stream String m Char => (a -> String) -> ParsecT String u m a -> ParsecT String u m String
 editFirst f parser = do
-  let endStream = try eof >> (return EOF)
-  x <- ((Edit . f) <$> (try parser)) <|> (Carry <$> anyChar) <|> endStream
+  let endOfStream = try eof >> (return EOF)
+  x <- ((Edit . f) <$> (try parser)) <|> (Carry <$> anyChar) <|> endOfStream
   case x of
-    Edit str -> fmap (str <>) $ many anyChar -- consume rest automatically  --  (findEdit f parser) 
-    Carry chr -> fmap ([chr] <>) (findEdit f parser) 
+    Edit str -> fmap (str <>) $ many anyChar -- consume rest automatically  --  (findEdit f parser)
+    Carry chr -> fmap ([chr] <>) (findEdit f parser)
     EOF -> return [] 
 
 
@@ -214,6 +214,7 @@ findSomeHTML parser text =
 
     
         
+findAllBetween :: a
 findAllBetween = undefined
 
 

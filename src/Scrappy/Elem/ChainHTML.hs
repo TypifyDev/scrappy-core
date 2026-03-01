@@ -6,27 +6,28 @@ module Scrappy.Elem.ChainHTML where
 
 
 import Scrappy.Find (findNaive)
-import Scrappy.Links (maybeUsefulUrl)
 import Scrappy.Elem.SimpleElemParser (elemParser)
-import Scrappy.Elem.ElemHeadParse (parseOpeningTag, hrefParser)
+import Scrappy.Elem.ElemHeadParse (parseOpeningTag)
 import Scrappy.Elem.Types (Elem', ShowHTML, ElemHead, Elem, innerText'
                   , matches')
 
-import Control.Monad.Trans.Maybe (MaybeT)
 import Text.Parsec (ParsecT, Stream, char, (<|>), many, parserFail, parse, parserZero, string, optional)
-import Control.Applicative (some, liftA2)
+import Control.Applicative (some)
 import Data.Functor.Identity (Identity)
-import Data.Maybe (catMaybes)
+import Data.Maybe (listToMaybe)
 -- functions for chaining free-range html patterns based on the previous
 -- patterns to allow for maximum flexibility 
 
 nl :: Stream s m Char => ParsecT s u m ()
 nl = optional (many $ (char '\n' <|> char ' '))
 
+manyHtml :: Stream s m Char => ParsecT s u m a -> ParsecT s u m [a]
 manyHtml p = many $ p <* nl
 
+someHtml :: Stream s m Char => ParsecT s u m a -> ParsecT s u m [a]
 someHtml p = some $ p <* nl
 
+manyTillHtml_ :: Stream s m Char => ParsecT s u m a -> ParsecT s u m end -> ParsecT s u m ([a], end)
 manyTillHtml_ p end = manyTill_ (p <* nl) end 
 
 
@@ -59,10 +60,10 @@ clean = undefined -- drop if == ( \n | \" | '\\' )
 
 
 mustContain :: ParsecT s u m (Elem' a) -> Int -> ParsecT s u m b -> ParsecT s u m (Elem' a)
-mustContain e count pat = do
+mustContain e count _pat = do
   out <- e
   case parse (findNaive $ string "Search") "" (innerText' out) of
-    Right (Just xs) -> if count > (length xs) then parserZero else return out
+    Right (Just xs) -> if count > length xs then parserZero else return out
     _ -> parserZero
     
 -- | An elem head configures the bracketing so this is all we need for
@@ -76,6 +77,7 @@ contains'' :: (Stream s m Char, ShowHTML a) => Shell
            -> ParsecT s u m [a]
 contains'' (e,as) p = matches' <$> elemParser (Just [e]) (Just p) as
 
+parseInShell :: ParsecT s u m (Elem' a) -> ParsecT String () Identity b -> ParsecT s u m b
 parseInShell = contains 
 
 -- | This will be fully removed in the future
@@ -116,10 +118,14 @@ contains' shell b = do
     Right Nothing -> parserFail "no matches in this container" 
 
 containsFirst :: ShowHTML a =>
-                 ParsecT s u m (Elem' a) 
+                 ParsecT s u m (Elem' a)
               -> ParsecT String () Identity b
               -> ParsecT s u m b
-containsFirst shell b = head <$> contains' shell b
+containsFirst shell b = do
+  result <- contains' shell b
+  case listToMaybe result of
+    Just x -> return x
+    Nothing -> parserFail "no matches in containsFirst"
 
 
 sequenceHtml :: Stream s m Char => ParsecT s u m a -> ParsecT s u m b -> ParsecT s u m (a, b)
