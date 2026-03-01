@@ -228,12 +228,15 @@ instance ShowHTML a => ShowHTML (TreeHTML a) where
 
 
 -- | Note, this is the representation i'll be using
+-- | _rawInner preserves the raw HTMLMatcher list before folding, allowing
+-- | consumers to iterate over child elements directly without re-parsing
 data TreeHTML a = TreeHTML { _topEl :: Elem
                            , _topAttrs :: Map String String
                            --
                            , _matches' :: [a]
                            , _innerText' :: String
-                           , _innerTree' :: Forest ElemHead 
+                           , _innerTree' :: Forest ElemHead
+                           , _rawInner :: [HTMLMatcher TreeHTML a]
                            } deriving Show 
 
 
@@ -615,7 +618,7 @@ enoughMatches required e a (asString, matches) =
 enoughMatchesTree :: Int -> String -> Map String String -> (String, [a], Forest ElemHead) -> ParsecT s u m (TreeHTML a)
 enoughMatchesTree required e a (asString, matches, forest) =
   if required <= (length matches)
-  then return $ TreeHTML e a matches asString forest
+  then return $ TreeHTML e a matches asString forest []  -- TODO: propagate rawInner
   else parserFail "not enough matches" -- should throw real error 
 
 

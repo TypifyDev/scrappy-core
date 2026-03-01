@@ -198,3 +198,85 @@ spec = do
           ST._innerText' tree `shouldContain` "<span>span</span>"
           ST._innerText' tree `shouldContain` "text after"
         Left err -> expectationFailure $ show err
+
+  describe "_rawInner provides direct child access (THE FIX)" $ do
+    -- _rawInner preserves the raw HTMLMatcher list, allowing direct iteration
+    -- over child elements without re-parsing
+
+    it "rawInner provides direct access to child elements" $ do
+      -- Original HTML with nested div (same case that failed with re-parsing)
+      let html = "<div class=\"outer\">\n  <div class=\"inner\">content</div>\n</div>"
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right outerTree -> do
+          -- _rawInner gives us direct access to children!
+          let rawChildren = ST._rawInner outerTree
+          -- Should have: IText "\n  ", Element innerDiv, IText "\n"
+          length rawChildren `shouldSatisfy` (>= 2)
+
+          -- Find the Element in rawChildren
+          let elements = [t | ST.Element t <- rawChildren]
+          length elements `shouldBe` 1
+
+          -- Direct access to the inner TreeHTML - no re-parsing needed!
+          let innerTree = head elements
+          ST._topEl innerTree `shouldBe` "div"
+          Map.lookup "class" (ST._topAttrs innerTree) `shouldBe` Just "inner"
+          ST._innerText' innerTree `shouldBe` "content"
+        Left err -> expectationFailure $ show err
+
+    it "rawInner preserves multiple children with text between" $ do
+      -- Parse div with two child divs
+      let html = "<div><div class=\"a\">first</div><div class=\"b\">second</div></div>"
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          let rawChildren = ST._rawInner tree
+          -- Extract just the Element children
+          let elements = [t | ST.Element t <- rawChildren]
+          length elements `shouldBe` 2
+
+          -- First child
+          ST._topEl (elements !! 0) `shouldBe` "div"
+          Map.lookup "class" (ST._topAttrs (elements !! 0)) `shouldBe` Just "a"
+          ST._innerText' (elements !! 0) `shouldBe` "first"
+
+          -- Second child
+          ST._topEl (elements !! 1) `shouldBe` "div"
+          Map.lookup "class" (ST._topAttrs (elements !! 1)) `shouldBe` Just "b"
+          ST._innerText' (elements !! 1) `shouldBe` "second"
+        Left err -> expectationFailure $ show err
+
+    it "rawInner captures text nodes between elements" $ do
+      let html = "<div>before <span>middle</span> after</div>"
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          let rawChildren = ST._rawInner tree
+          -- Should have: IText "before ", Element span, IText " after"
+          let texts = [s | ST.IText s <- rawChildren]
+          let elements = [t | ST.Element t <- rawChildren]
+
+          length elements `shouldBe` 1
+          -- Text content is captured (may be split into multiple IText)
+          concat texts `shouldContain` "before"
+          concat texts `shouldContain` "after"
+        Left err -> expectationFailure $ show err
+
+    it "rawInner provides full TreeHTML for deeply nested structures" $ do
+      let html = "<div><span class=\"highlight\">important text</span></div>"
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          -- _innerTree' only has (Elem, Attrs) - no content
+          let forest = ST._innerTree' tree
+          length forest `shouldBe` 1
+
+          -- But _rawInner has full TreeHTML with content!
+          let elements = [t | ST.Element t <- ST._rawInner tree]
+          length elements `shouldBe` 1
+
+          let spanTree = head elements
+          ST._topEl spanTree `shouldBe` "span"
+          ST._innerText' spanTree `shouldBe` "important text"
+        Left err -> expectationFailure $ show err
