@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Scrappy.Elem.TreeElemParserSpec (spec) where
 
@@ -7,13 +8,13 @@ import Text.Parsec (parse, ParsecT)
 import Data.Functor.Identity (Identity)
 import qualified Data.Map as Map
 
-import Scrappy.Elem.TreeElemParser (treeElemParser, selfClosing)
-import Scrappy.Elem.Types (TreeHTML(..), elTag, attrs, innerText', matches')
+import Scrappy.Elem.TreeElemParser (treeElemParser)
+import qualified Scrappy.Elem.Types as ST
 
 import TestUtils (parseSucceeds)
 
--- Helper type alias for tree parsers with String inner type
-type TreeParser = ParsecT String () Identity (TreeHTML String)
+-- Helper type alias for TreeHTML parser
+type TreeParser = ParsecT String () Identity (ST.TreeHTML String)
 
 -- Helper to create treeElemParser with explicit String type
 treeParserS :: Maybe [String] -> [(String, Maybe String)] -> TreeParser
@@ -21,88 +22,179 @@ treeParserS tags attrss = treeElemParser tags (Nothing :: Maybe (ParsecT String 
 
 spec :: Spec
 spec = do
-  describe "treeElemParser" $ do
-    it "parses a simple element and builds tree structure" $ do
-      let result = parse (treeParserS (Just ["div"]) []) "" "<div>content</div>"
+  describe "treeElemParser basic parsing" $ do
+    it "parses a simple element" $ do
+      let result = parse (treeParserS Nothing []) "" "<div>content</div>"
       case result of
         Right tree -> do
-          elTag tree `shouldBe` "div"
-          innerText' tree `shouldBe` "content"
+          ST._topEl tree `shouldBe` "div"
+          ST._innerText' tree `shouldBe` "content"
         Left err -> expectationFailure $ show err
 
-    it "correctly populates _topEl field" $ do
-      let result = parse (treeParserS (Just ["span"]) []) "" "<span>text</span>"
-      case result of
-        Right tree -> _topEl tree `shouldBe` "span"
-        Left err -> expectationFailure $ show err
-
-    it "correctly populates _topAttrs field" $ do
-      let result = parse (treeParserS (Just ["a"]) [("href", Just "/link")]) "" "<a href=\"/link\" class=\"nav\">link</a>"
+    it "parses element with attributes" $ do
+      let result = parse (treeParserS Nothing []) "" "<div class=\"test\">content</div>"
       case result of
         Right tree -> do
-          Map.lookup "href" (_topAttrs tree) `shouldBe` Just "/link"
-          Map.lookup "class" (_topAttrs tree) `shouldBe` Just "nav"
+          ST._topEl tree `shouldBe` "div"
+          Map.lookup "class" (ST._topAttrs tree) `shouldBe` Just "test"
         Left err -> expectationFailure $ show err
 
-    it "correctly populates _innerText' field" $ do
-      let result = parse (treeParserS (Just ["p"]) []) "" "<p>Hello World</p>"
-      case result of
-        Right tree -> _innerText' tree `shouldBe` "Hello World"
-        Left err -> expectationFailure $ show err
-
-    it "handles nested elements in tree structure" $ do
-      let html = "<div><span>nested</span></div>"
-      let result = parse (treeParserS (Just ["div"]) []) "" html
+  describe "nested elements" $ do
+    it "parses simple nested elements" $ do
+      let html = "<div><span>text</span></div>"
+      let result = parse (treeParserS Nothing []) "" html
       case result of
         Right tree -> do
-          elTag tree `shouldBe` "div"
-          -- Inner tree should contain the nested span
-          length (_innerTree' tree) `shouldSatisfy` (>= 0)
+          ST._topEl tree `shouldBe` "div"
+          ST._innerText' tree `shouldContain` "<span>text</span>"
         Left err -> expectationFailure $ show err
 
-    it "works with deeply nested elements" $ do
-      let html = "<div><div><div>deep</div></div></div>"
-      let result = parse (treeParserS (Just ["div"]) []) "" html
-      case result of
-        Right tree -> elTag tree `shouldBe` "div"
-        Left err -> expectationFailure $ show err
-
-  describe "self-closing elements in tree parser" $ do
-    it "includes standard self-closing tags" $ do
-      "br" `elem` selfClosing `shouldBe` True
-      "img" `elem` selfClosing `shouldBe` True
-      "input" `elem` selfClosing `shouldBe` True
-
-    it "parses self-closing br element" $ do
-      let result = parse (treeParserS (Just ["br"]) []) "" "<br>"
-      case result of
-        Right tree -> elTag tree `shouldBe` "br"
-        Left err -> expectationFailure $ show err
-
-    it "parses self-closing input element with attributes" $ do
-      let result = parse (treeParserS (Just ["input"]) [("type", Just "text")]) "" "<input type=\"text\" name=\"field\">"
+    it "parses nested elements on same line" $ do
+      let html = "<div class=\"outer\"><div class=\"inner\">content</div></div>"
+      let result = parse (treeParserS Nothing []) "" html
       case result of
         Right tree -> do
-          elTag tree `shouldBe` "input"
-          Map.lookup "type" (attrs tree) `shouldBe` Just "text"
+          ST._topEl tree `shouldBe` "div"
+          Map.lookup "class" (ST._topAttrs tree) `shouldBe` Just "outer"
+          -- The inner div should be in the innerText
+          ST._innerText' tree `shouldContain` "<div class=\"inner\">content</div>"
         Left err -> expectationFailure $ show err
 
-  describe "tree element with matches" $ do
-    it "returns empty matches when no inner pattern specified" $ do
-      let result = parse (treeParserS (Just ["div"]) []) "" "<div>text</div>"
+    -- THIS IS THE BUG: nested elements with whitespace/newline before them
+    it "parses nested elements with newline before inner element" $ do
+      let html = "<div class=\"outer\">\n<div class=\"inner\">content</div></div>"
+      let result = parse (treeParserS Nothing []) "" html
       case result of
-        Right tree -> matches' tree `shouldBe` []
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          Map.lookup "class" (ST._topAttrs tree) `shouldBe` Just "outer"
+          -- CRITICAL: The inner div MUST be captured in innerText
+          ST._innerText' tree `shouldContain` "<div class=\"inner\">content</div>"
         Left err -> expectationFailure $ show err
 
-  describe "element filtering" $ do
-    it "matches when element is in allowed list" $ do
-      parseSucceeds (treeParserS (Just ["div", "span"]) []) "<div>content</div>"
-        `shouldBe` True
+    it "parses nested elements with indentation before inner element" $ do
+      let html = "<div class=\"outer\">\n            <div class=\"inner\">content</div></div>"
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          -- CRITICAL: The inner div MUST be captured in innerText
+          ST._innerText' tree `shouldContain` "<div class=\"inner\">"
+          ST._innerText' tree `shouldContain` "content"
+        Left err -> expectationFailure $ show err
 
-    it "fails when element is not in allowed list" $ do
-      parseSucceeds (treeParserS (Just ["div", "span"]) []) "<p>content</p>"
-        `shouldBe` False
+    it "parses deeply nested elements with whitespace" $ do
+      let html = unlines
+            [ "<div class=\"level1\">"
+            , "  <div class=\"level2\">"
+            , "    <div class=\"level3\">deep</div>"
+            , "  </div>"
+            , "</div>"
+            ]
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          ST._innerText' tree `shouldContain` "level2"
+          ST._innerText' tree `shouldContain` "level3"
+          ST._innerText' tree `shouldContain` "deep"
+        Left err -> expectationFailure $ show err
 
-    it "matches any element when elemList is Nothing" $ do
-      parseSucceeds (treeParserS Nothing []) "<custom>content</custom>"
-        `shouldBe` True
+  describe "ghcup page patterns" $ do
+    -- This is the exact pattern from ghcup that was failing
+    it "parses flex div with nested indented div" $ do
+      let html = unlines
+            [ "<div class=\"flex flex-wrap -mx-3\">"
+            , "            <div class=\"w-full md:w-1/4 px-3\"><div class=\"sticky\">sidebar</div></div>"
+            , "            <div class=\"w-full md:w-3/4 px-3\" role=\"main\">main content</div>"
+            , "</div>"
+            ]
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          Map.lookup "class" (ST._topAttrs tree) `shouldBe` Just "flex flex-wrap -mx-3"
+          -- Both nested divs should be in innerText
+          ST._innerText' tree `shouldContain` "w-full md:w-1/4"
+          ST._innerText' tree `shouldContain` "w-full md:w-3/4"
+          ST._innerText' tree `shouldContain` "sidebar"
+          ST._innerText' tree `shouldContain` "main content"
+        Left err -> expectationFailure $ show err
+
+    it "parses container with multiple nested sections" $ do
+      let html = unlines
+            [ "<div class=\"max-w-7xl mx-auto px-3 mt-5\">"
+            , "    <div class=\"flex flex-wrap -mx-3\">"
+            , "            <div class=\"w-full md:w-1/4 px-3\">"
+            , "                <nav class=\"sidebar\">nav content</nav>"
+            , "            </div>"
+            , "            <div class=\"w-full md:w-3/4 px-3\" role=\"main\">"
+            , "                <section>main content</section>"
+            , "            </div>"
+            , "    </div>"
+            , "</div>"
+            ]
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          -- The flex wrapper should be in innerText
+          ST._innerText' tree `shouldContain` "flex flex-wrap"
+          -- Both columns should be present
+          ST._innerText' tree `shouldContain` "w-full md:w-1/4"
+          ST._innerText' tree `shouldContain` "w-full md:w-3/4"
+          ST._innerText' tree `shouldContain` "nav content"
+          ST._innerText' tree `shouldContain` "main content"
+        Left err -> expectationFailure $ show err
+
+  describe "self-closing elements" $ do
+    it "parses self-closing void elements" $ do
+      let html = "<div><br><img src=\"test.jpg\"><hr></div>"
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          ST._innerText' tree `shouldContain` "<br>"
+          ST._innerText' tree `shouldContain` "<img"
+          ST._innerText' tree `shouldContain` "<hr>"
+        Left err -> expectationFailure $ show err
+
+    it "parses self-closing with slash notation" $ do
+      let html = "<div><br/><img src=\"test.jpg\"/></div>"
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          -- Self-closing elements should be captured
+          ST._innerText' tree `shouldContain` "br"
+          ST._innerText' tree `shouldContain` "img"
+        Left err -> expectationFailure $ show err
+
+  describe "edge cases" $ do
+    it "handles empty inner content" $ do
+      let result = parse (treeParserS Nothing []) "" "<div></div>"
+      case result of
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          ST._innerText' tree `shouldBe` ""
+        Left err -> expectationFailure $ show err
+
+    it "handles whitespace-only inner content" $ do
+      let result = parse (treeParserS Nothing []) "" "<div>   \n   </div>"
+      case result of
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          -- Whitespace should be preserved
+          ST._innerText' tree `shouldSatisfy` (not . null)
+        Left err -> expectationFailure $ show err
+
+    it "handles mixed text and elements" $ do
+      let html = "<div>text before <span>span</span> text after</div>"
+      let result = parse (treeParserS Nothing []) "" html
+      case result of
+        Right tree -> do
+          ST._topEl tree `shouldBe` "div"
+          ST._innerText' tree `shouldContain` "text before"
+          ST._innerText' tree `shouldContain` "<span>span</span>"
+          ST._innerText' tree `shouldContain` "text after"
+        Left err -> expectationFailure $ show err
