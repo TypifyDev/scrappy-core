@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Scrappy.Scrape where
 
@@ -16,7 +17,10 @@ import Control.Monad.IO.Class (MonadIO)
 import Data.Functor.Identity (Identity)
 import Data.Either (fromRight)
 import Data.Maybe (fromMaybe, listToMaybe)
-import Text.Parsec (Stream, ParsecT, parse, string, parserZero, anyChar, manyTill, char, many, try, runParserT) 
+import Data.Text (Text)
+import qualified Data.Text as T
+import Text.Parsec (Stream, ParsecT, parse, string, parserZero, anyChar, manyTill, char, many, try, runParserT)
+import Text.Parsec.Text () 
 
 type ScraperT a = ParsecT Html () Identity a 
 ---type Html = String
@@ -33,13 +37,13 @@ scrapeLinked = undefined
 
 
 -- TODO(galen): move to Scrappy.Scrape
--- Generic function for dropping an abstract pattern from text 
-filterFromTextP :: ScraperT a -> ScraperT String
-filterFromTextP p = (many (try p)) >> (liftA2 (:) anyChar (filterFromTextP p))
+-- Generic function for dropping an abstract pattern from text
+filterFromTextP :: ScraperT a -> ScraperT Text
+filterFromTextP p = (many (try p)) >> (fmap T.pack $ (:) <$> anyChar <*> (T.unpack <$> filterFromTextP p))
 
--- We can return a string since this will never fail
--- its provably impossible 
-filterPattern :: String -> ScraperT a -> String
+-- We can return Text since this will never fail
+-- its provably impossible
+filterPattern :: Text -> ScraperT a -> Text
 filterPattern txt p = either undefined id $ parse (filterFromTextP p) "" txt 
 
 
@@ -84,20 +88,20 @@ findFit cond (x:xs) = if cond x then Just x else findFit cond xs
 
 
 -- | Find all occurences of a given parsing/scraping pattern
--- | e.g. getHtml' "https://google.ca" >>= return . runScraperOnHtml (el "a" []) , would give all 'a' tag html elements on google.ca  
-runScraperOnHtml :: ParsecT String () Identity a -> String -> Maybe [a]
-runScraperOnHtml p html = fromRight Nothing $ parse (findNaive $ p) "" html 
+-- | e.g. getHtml' "https://google.ca" >>= return . runScraperOnHtml (el "a" []) , would give all 'a' tag html elements on google.ca
+runScraperOnHtml :: ParsecT Text () Identity a -> Text -> Maybe [a]
+runScraperOnHtml p html = fromRight Nothing $ parse (findNaive $ p) "" html
 
 
-runScraperOnHtmlIO :: (MonadIO m, Show a, Stream String m Char) => ParsecT String () m a -> String -> m (Maybe [a])
+runScraperOnHtmlIO :: (MonadIO m, Show a, Stream Text m Char) => ParsecT Text () m a -> Text -> m (Maybe [a])
 runScraperOnHtmlIO p html = do
-  x <- runParserT (findNaiveIO $ p) () "" html 
-  pure $ fromRight Nothing x 
+  x <- runParserT (findNaiveIO $ p) () "" html
+  pure $ fromRight Nothing x
 
-scrapeIO :: (MonadIO m, Show a, Stream String m Char) => ParsecT String () m a -> String -> m (Maybe [a])
-scrapeIO = runScraperOnHtmlIO 
+scrapeIO :: (MonadIO m, Show a, Stream Text m Char) => ParsecT Text () m a -> Text -> m (Maybe [a])
+scrapeIO = runScraperOnHtmlIO
 
-runScraperInBody :: ParsecT String () Identity a -> String -> Maybe [a]
+runScraperInBody :: ParsecT Text () Identity a -> Text -> Maybe [a]
 runScraperInBody prsr html = fromRight Nothing $ parse (skipToInBody >> findNaive prsr) "" html
 
 skipToInBody :: Stream s m Char => ParsecT s u m ()
@@ -105,17 +109,17 @@ skipToInBody = manyTill anyChar (parseOpeningTag (Just ["html"]) [] >> char '>')
                </>> el "head" []
                </>> parseOpeningTag (Just ["body"]) []
                >> char '>'
-               >> return () 
+               >> return ()
 
-  
-runScraperOnBody :: ParsecT String () Identity a -> String -> Maybe [a] 
-runScraperOnBody prsr html = fromRight Nothing $ parse (skipToBody >> findNaive prsr) "" html 
+
+runScraperOnBody :: ParsecT Text () Identity a -> Text -> Maybe [a]
+runScraperOnBody prsr html = fromRight Nothing $ parse (skipToBody >> findNaive prsr) "" html
 
 skipToBody :: Stream s m Char => ParsecT s u m ()
-skipToBody = manyTill anyChar (parseOpeningTag (Just ["html"]) [] >> char '>') </>> el "head" [] >> return () 
+skipToBody = manyTill anyChar (parseOpeningTag (Just ["html"]) [] >> char '>') </>> el "head" [] >> return ()
 
 
-runScraperOnHtml1 :: ParsecT String () Identity a -> String -> Maybe a
+runScraperOnHtml1 :: ParsecT Text () Identity a -> Text -> Maybe a
 runScraperOnHtml1 p = (>>= listToMaybe) . runScraperOnHtml p
 
 
@@ -179,14 +183,14 @@ findCount p = do
 
 
 
-type Prefix' = String
+type Prefix' = Text
 {-# DEPRECATED scrapeBracketed "experimental, first attempt" #-}
 scrapeBracketed :: Prefix' -> ScraperT a -> Html -> Maybe [a]
-scrapeBracketed pre scraper html = mconcat <$> scrape (string pre >> manyTill scraper (string pre)) html
+scrapeBracketed pre scraper html = mconcat <$> scrape (string (T.unpack pre) >> manyTill scraper (string (T.unpack pre))) html
 
 
 
-type Prefix = String 
+type Prefix = Text
 scrapePrefixed :: Prefix -> ScraperT a -> Html -> Maybe [a]
-scrapePrefixed pre scraper html = scrape (string pre >> scraper) html
+scrapePrefixed pre scraper html = scrape (string (T.unpack pre) >> scraper) html
 

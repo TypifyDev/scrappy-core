@@ -4,6 +4,7 @@ module Scrappy.Types where
 
 -- may change Types + Links -> Navigation + Something else
 
+import Data.Text (Text)
 import Text.Parsec (ParsecT, parserZero)
 --import Witherable
 
@@ -51,5 +52,5 @@ data ScrapeFail = Eof | NonMatch deriving Show
 -- as scrape coin 
 
 -- |  data Processor a b = Processor ThreadId { runFunc :: (a -> b) }
-type Html = String -- or could be just the pdf, but maybe even URL for storage sake --> could become research graph
-                   -- but in a sense, would be a forest of uncited (yet) publicationsop
+type Html = Text -- or could be just the pdf, but maybe even URL for storage sake --> could become research graph
+                 -- but in a sense, would be a forest of uncited (yet) publications

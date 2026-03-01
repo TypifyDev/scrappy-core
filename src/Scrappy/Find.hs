@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Scrappy.Find where
 
@@ -10,6 +11,10 @@ module Scrappy.Find where
 import Control.Monad.IO.Class
 import Text.Parsec (ParsecT, ParseError, Parsec, Stream, parse, eof, anyChar, (<|>), try, parserZero
                    , many)
+import Text.Parsec.Text ()  -- Import Stream Text instance
+import Data.Text (Text)
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Builder as TB
 import Data.Functor.Identity (Identity)
 import Data.Either (fromRight)
 import Scrappy.Types (ScrapeFail(..))
@@ -104,43 +109,53 @@ find parser = do
 -- return (x:xs)
 
 -- | Should never throw Left or I did it wrong
-streamEdit :: ParsecT String () Identity a -> (a -> String) -> String -> String
-streamEdit p f src = fromRight undefined $ parse (try $ findEdit f p) "" src
+-- Uses Text.Builder for O(n) instead of O(n²) performance
+streamEdit :: ParsecT Text () Identity a -> (a -> Text) -> Text -> Text
+streamEdit p f src = TL.toStrict $ TB.toLazyText $
+  fromRight mempty $ parse (try $ findEditBuilder f p) "" src
 
 
--- -- Note: List will be backwards as is
-findEdit :: Stream String m Char => (a -> String) -> ParsecT String u m a -> ParsecT String u m String
-findEdit f parser = do
-  let endOfStream = try eof >> (return EOF)
-  x <- ((Edit . f) <$> (try parser)) <|> (Carry <$> anyChar) <|> endOfStream
-  case x of
-    Edit str -> fmap (str <>) (findEdit f parser)
-    Carry chr -> fmap ([chr] <>) (findEdit f parser)
-    EOF -> return [] 
+-- | Build result using Text.Builder for O(1) appends
+findEditBuilder :: Stream Text m Char => (a -> Text) -> ParsecT Text u m a -> ParsecT Text u m TB.Builder
+findEditBuilder f parser = go
+  where
+    go = do
+      let endOfStream = try eof >> return Nothing
+      x <- (Just . Left . f <$> try parser) <|> (Just . Right <$> anyChar) <|> endOfStream
+      case x of
+        Just (Left txt) -> (TB.fromText txt <>) <$> go
+        Just (Right chr) -> (TB.singleton chr <>) <$> go
+        Nothing -> return mempty
 
 
--- -- Note: List will be backwards as is
-editFirst :: Stream String m Char => (a -> String) -> ParsecT String u m a -> ParsecT String u m String
-editFirst f parser = do
-  let endOfStream = try eof >> (return EOF)
-  x <- ((Edit . f) <$> (try parser)) <|> (Carry <$> anyChar) <|> endOfStream
-  case x of
-    Edit str -> fmap (str <>) $ many anyChar -- consume rest automatically  --  (findEdit f parser)
-    Carry chr -> fmap ([chr] <>) (findEdit f parser)
-    EOF -> return [] 
+-- | Legacy findEdit for backwards compatibility (now uses Builder internally)
+findEdit :: Stream Text m Char => (a -> Text) -> ParsecT Text u m a -> ParsecT Text u m Text
+findEdit f parser = fmap (TL.toStrict . TB.toLazyText) (findEditBuilder f parser)
+
+
+-- | Edit only the first match, leave rest unchanged
+editFirst :: Stream Text m Char => (a -> Text) -> ParsecT Text u m a -> ParsecT Text u m Text
+editFirst f parser = fmap (TL.toStrict . TB.toLazyText) $ go
+  where
+    go = do
+      let endOfStream = try eof >> return Nothing
+      x <- (Just . Left . f <$> try parser) <|> (Just . Right <$> anyChar) <|> endOfStream
+      case x of
+        Just (Left txt) -> do
+          rest <- many anyChar  -- consume rest without further parsing
+          return $ TB.fromText txt <> TB.fromString rest
+        Just (Right chr) -> (TB.singleton chr <>) <$> go
+        Nothing -> return mempty
 
 
 
 -- endStream :: (Stream s m t, Show t) => ParsecT s u m (Either ScrapeFail a)
 -- endStream = try (eof) >> (return $ Left Eof)
 
-    
+
 -- return (x:xs)
 
--- | We can define Edit to be a string because we know it will turn back into one
-data StreamEditCase = EOF
-                    | Carry Char
-                    | Edit String
+-- Note: StreamEditCase removed - now using Either Text Char with Nothing for EOF
 
 
 -- findSome = undefined
