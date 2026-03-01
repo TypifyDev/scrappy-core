@@ -235,9 +235,20 @@ data TreeHTML a = TreeHTML { _topEl :: Elem
                            --
                            , _matches' :: [a]
                            , _innerText' :: String
-                           , _innerTree' :: Forest ElemHead
                            , _rawInner :: [HTMLMatcher TreeHTML a]
-                           } deriving Show 
+                           } deriving Show
+
+-- | Derive Forest ElemHead from _rawInner (replaces the old _innerTree' field)
+deriveForest :: [HTMLMatcher TreeHTML a] -> Forest ElemHead
+deriveForest matchers =
+  [ Node (_topEl t, _topAttrs t) (deriveForest (_rawInner t))
+  | Element t <- matchers
+  ]
+
+-- | Backwards-compatible accessor for inner tree structure
+-- | Previously this was a field, now it's computed from _rawInner
+_innerTree' :: TreeHTML a -> Forest ElemHead
+_innerTree' tree = deriveForest (_rawInner tree) 
 
 
 ---Future: Make both below into semigroups
@@ -616,9 +627,9 @@ enoughMatches required e a (asString, matches) =
   else parserFail "not enough matches" -- should throw real error
 
 enoughMatchesTree :: Int -> String -> Map String String -> (String, [a], Forest ElemHead) -> ParsecT s u m (TreeHTML a)
-enoughMatchesTree required e a (asString, matches, forest) =
+enoughMatchesTree required e a (asString, matches, _forest) =
   if required <= (length matches)
-  then return $ TreeHTML e a matches asString forest []  -- TODO: propagate rawInner
+  then return $ TreeHTML e a matches asString []  -- TODO: propagate rawInner
   else parserFail "not enough matches" -- should throw real error 
 
 

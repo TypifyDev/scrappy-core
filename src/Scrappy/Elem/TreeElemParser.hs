@@ -94,8 +94,8 @@ treeElemParser'  elemOpts matchh attrsSubset = do
    True -> do
       (try (string ">") <|> string "/>")
       case matchh of
-        Nothing ->  return $ TreeHTML elem' attrs' mempty mempty mempty []
-        Just _ -> parserZero 
+        Nothing ->  return $ TreeHTML elem' attrs' mempty mempty []
+        Just _ -> parserZero
 
      -- ((try string ">") <|> string "/>") >> return TreeHTML elem' attrs' mempty mempty mempty
    False -> do
@@ -103,8 +103,8 @@ treeElemParser'  elemOpts matchh attrsSubset = do
      rawMatchers <- (try (string "/>") >> return [])
                     <|> (try $ innerElemParser2 elem' matchh)
                     <|> (selfClosingTextful matchh)
-     let (inText, matchBook, treees) = foldr foldFuncTrup mempty rawMatchers
-     return $ TreeHTML elem' attrs' matchBook inText treees rawMatchers
+     let (inText, matchBook, _treees) = foldr foldFuncTrup mempty rawMatchers
+     return $ TreeHTML elem' attrs' matchBook inText rawMatchers
 
 -------------------------------------------------------------------------------------------------------------------
 
@@ -158,8 +158,8 @@ treeElemParserSpecific :: (Stream s m Char, ShowHTML a) =>
 treeElemParserSpecific match elem' attrs' subTree = do
   (tag, attrsOut) <- parseOpeningTagDesc (Just [elem']) attrs'
   char '>'
-  (matchBook, inText, treees) <- innerParserSpecific match tag subTree
-  return $ TreeHTML tag attrsOut matchBook inText treees []  -- TODO: propagate rawInner through innerParserSpecific
+  (matchBook, inText, _treees) <- innerParserSpecific match tag subTree
+  return $ TreeHTML tag attrsOut matchBook inText []  -- TODO: propagate rawInner through innerParserSpecific
 
 validateGPR :: [Many (Tree ElemHead)] -> ParsecT s u m [HTMLMatcher TreeHTML a]
 validateGPR manyElHeads =
@@ -299,11 +299,11 @@ treeElemParserSpecificContinuous match manyElHeads = do
     --  manyElHeads = [] | x:xs
     --  [] -> then why do we have an opening tag? this should have been either an IText or the endTag
   
-  (m, inTx, inTr) <- innerParserSpecific match e innerForest
+  (m, inTx, _inTr) <- innerParserSpecific match e innerForest
   let
     manyElHeads' :: [Many (Tree ElemHead)]
     manyElHeads' = drop ((length manyElHeads) - (length outputStack)) manyElHeads
-  return $ (,) manyElHeads' (TreeHTML e attrs m inTx inTr [])  -- TODO: propagate rawInner
+  return $ (,) manyElHeads' (TreeHTML e attrs m inTx [])  -- TODO: propagate rawInner
 
 --------------------------------------------------------------------------------------------------------------------
 --------------------------------------------------------------------------------------------------------------------
@@ -332,21 +332,21 @@ treeElemParserContains match manyElHeads = do
           case elem e selfClosing of
             True -> do
               (try (string ">") <|> string "/>")
-              return $ (,) manyElHeads' (TreeHTML e ats mempty mempty mempty [])
+              return $ (,) manyElHeads' (TreeHTML e ats mempty mempty [])
             False -> do
-              (m, inTx, inTr) <- innerParserContains match e innerForest
-              return $ (,) manyElHeads' (TreeHTML e ats m inTx inTr [])  -- TODO: propagate rawInner
+              (m, inTx, _inTr) <- innerParserContains match e innerForest
+              return $ (,) manyElHeads' (TreeHTML e ats m inTx [])  -- TODO: propagate rawInner
         else -- this cannot be selfClosing
         do
-          (m, inTx, inTr) <- innerParserContains match e innerForest
-          return $ (,) manyElHeads' (TreeHTML e ats m inTx inTr [])  -- TODO: propagate rawInner
+          (m, inTx, _inTr) <- innerParserContains match e innerForest
+          return $ (,) manyElHeads' (TreeHTML e ats m inTx [])  -- TODO: propagate rawInner
 
       -- string "/>" >> return (mempty, mempty, mempty) <|> string ">" >> innerParserContains 
 
       
     Left someError -> do
-      (inText, matchBook, treees) <- innerTreeElemParser e match
-      return $ (,) manyElHeads (TreeHTML e ats matchBook inText treees [])  -- TODO: propagate rawInner 
+      (inText, matchBook, _treees) <- innerTreeElemParser e match
+      return $ (,) manyElHeads (TreeHTML e ats matchBook inText [])  -- TODO: propagate rawInner 
     
           
    -- ParsecT s u m ([a], String, [Tree ElemHead]) 
@@ -409,8 +409,8 @@ similarTreeH matchh treeH = do
   (e,at) <- parseOpeningTag (Just $ [elTag treeH]) (((fmap . fmap) Just) . Map.toList $ attrs treeH)
   char '>'
   rawMatchers <- htmlGenParserContains e matchh (groupify (_innerTree' treeH) [])
-  let (inTx, m, inTr) = foldr foldFuncTrup mempty rawMatchers
-  return $ TreeHTML e at m inTx inTr rawMatchers
+  let (inTx, m, _inTr) = foldr foldFuncTrup mempty rawMatchers
+  return $ TreeHTML e at m inTx rawMatchers
   
   -- treeElemParserContains matchh (elTag treeH) (Map.toList $ attrs treeH) (_innerTree' treeH)
   
