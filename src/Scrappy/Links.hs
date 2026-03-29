@@ -1,418 +1,491 @@
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
+{- |
+Module      : Scrappy.Links
+Description : URL handling, link validation, and site-tree navigation for web scraping
+Copyright   : (c) Galen Sprout, 2024
+License     : BSD-3-Clause
+Maintainer  : galen.sprout@gmail.com
 
-{-|
-Description: In a way, this is the most central component of the entire library;
-
+The recursive nature of scraping centers on the URL data structure.
 DOM -> Link >>= request --> DOM -> Link ...
-    ^^ 
-    this may be infinitely complicated by stuff such as JS 
-
-The recursive nature of scraping is the central data structure of a URL 
-
-Which makes me think that there may be more to consider at some point with the modern-uri package
-And doing stuff such as building site trees 
-
-
 -}
+module Scrappy.Links (
+    -- * Core types
 
-module Scrappy.Links where
+    -- | @since 0.1.0.0
+    Link (..),
+    -- | @since 0.1.0.0
+    PageNumber,
+    -- | @since 0.1.0.0
+    BaseUrl,
+    -- | @since 0.1.0.0
+    Url,
+    -- | @since 0.1.0.0
+    HrefURI,
+    -- | @since 0.1.0.0
+    CurrentUrl,
+    -- | @since 0.1.0.0
+    DOI,
+    -- | @since 0.1.0.0
+    Src,
+    -- | @since 0.1.0.0
+    RelativeUrl,
+    -- | @since 0.1.0.0
+    LastUrl,
+    -- | @since 0.1.0.0
+    Href,
+    -- | @since 0.1.0.0
+    HostName,
+    -- | @since 0.1.0.0
+    Namespace,
+    -- | @since 0.1.0.0
+    Option,
+    -- | @since 0.1.0.0
+    SiteTree,
+    -- | @since 0.1.0.0
+    GeneratedLink,
 
+    -- * Type classes
 
--- import Scrappy.Elem.Types (Elem'(..), ElemHead, innerText')
--- import Scrappy.Elem.ElemHeadParse (hrefParser)
--- import Find (findSomeHTMLNaive)
+    -- | @since 0.1.0.0
+    IsLink (..),
 
--- import qualified Network.URI as URI 
+    -- * Data types
 
+    -- | @since 0.1.0.0
+    ReferenceSys (..),
+    -- | @since 0.1.0.0
+    QParams (..),
+    -- | @since 0.1.0.0
+    DOMLink (..),
+
+    -- * URL operations
+
+    -- | @since 0.1.0.0
+    fixRelativeUrl,
+    -- | @since 0.1.0.0
+    fixURL,
+    -- | @since 0.1.0.0
+    deriveBaseUrl,
+    -- | @since 0.1.0.0
+    sameAuthority,
+    -- | @since 0.1.0.0
+    getHostName,
+    -- | @since 0.1.0.0
+    getFileName,
+    -- | @since 0.1.0.0
+    getLastPath,
+
+    -- * Link parsing and validation
+
+    -- | @since 0.1.0.0
+    parseLink,
+    -- | @since 0.1.0.0
+    doiParser,
+    -- | @since 0.1.0.0
+    fixSameSiteURL,
+
+    -- * URL filtering
+
+    -- | @since 0.1.0.0
+    maybeUsefulNewUrl,
+    -- | @since 0.1.0.0
+    maybeUsefulUrl,
+    -- | @since 0.1.0.0
+    maybeNewUrl,
+    -- | @since 0.1.0.0
+    urlIsNew,
+    -- | @since 0.1.0.0
+    usefulNewUrls,
+    -- | @since 0.1.0.0
+    usefulUrls,
+    -- | @since 0.1.0.0
+    numberOfQueryParamsIsZero,
+
+    -- * Stateful operations
+
+    -- | @since 0.1.0.0
+    getHtmlStateful,
+) where
+
+import qualified Control.Lens as Lens
 import Control.Monad (join)
-import qualified Network.URI as NURI
--- TODO(galen): Replace with Network.URI and deprecate Text.URI
-import Text.URI (URI, uriQuery, mkURI, uriPath, unRText, uriScheme)
-import Control.Lens ((^.))
-import qualified Text.URI.Lens as UL
-import Text.Parsec (ParsecT)
-import Data.Functor.Classes (eq1)
-import Data.Map (Map)
-import Data.Maybe (fromJust, fromMaybe)
-import Data.List (isSuffixOf, isInfixOf, isPrefixOf)
-import qualified Data.List.NonEmpty as NE (last)
-import Data.Text (Text, pack, unpack, splitOn)
+import qualified Data.Aeson.TH as AesonTH
 import Data.Char (toLower)
+import Data.Functor.Classes (eq1)
+import Data.List (isInfixOf, isPrefixOf, isSuffixOf)
+import qualified Data.List.NonEmpty as NE (last)
+import qualified Data.Map as Map
+import Data.Maybe (fromJust, fromMaybe)
+import qualified Data.Text as T
+import qualified Network.URI as NURI
+import Text.Parsec (ParsecT)
+import qualified Text.URI as URI
+import qualified Text.URI.Lens as UL
+import Prelude (Bool (..), Either (..), Eq, Int, Maybe (..), Ord, Read, Show, String, drop, elem, flip, fmap, fst, last, length, not, otherwise, return, snd, undefined, ($), (&&), (.), (/=), (<$>), (<*>), (<>), (=<<), (==), (>>=))
 
-import Data.Aeson.TH (defaultOptions, deriveJSON)
+{- | Page number for pagination.
 
+@since 0.1.0.0
+-}
 type PageNumber = Int
 
--- |
+{- | Base URL for relative URL resolution.
+
+@since 0.1.0.0
+-}
 type BaseUrl = Link
-type Url = String 
 
+{- | A raw URL string.
 
+@since 0.1.0.0
+-}
+type Url = String
 
-type HrefURI = String 
+{- | A raw href URI string.
 
--- TODO(galen): make this a Link 
-type CurrentUrl = Url  
+@since 0.1.0.0
+-}
+type HrefURI = String
 
-type DOI = String -- Change to URI if this works 
+{- | The current page URL during scraping.
 
--- linkToURI :: Link -> URI
--- linkToURI = undefined
+@since 0.1.0.0
+-}
+type CurrentUrl = Url
 
--- evalLink :: Link -> String
--- evalLink = linkToText
---   where
---     linkToText x = case x of
---       OuterPage x' -> x'
---       SearchFormURL y -> y
---       ListingPage _ _ _ _ -> undefined
---       PageHasPdf r -> r
---       Sourcery _ _ -> undefined
+{- | A Digital Object Identifier string.
 
+@since 0.1.0.0
+-}
+type DOI = String
 
+{- | A source URL.
 
+@since 0.1.0.0
+-}
 type Src = Url
-type RelativeUrl = Url 
 
+{- | A relative URL string.
 
+@since 0.1.0.0
+-}
+type RelativeUrl = Url
+
+{- | Fix a relative URL against a base URL to produce an absolute URL.
+
+@since 0.1.0.0
+-}
 fixRelativeUrl :: BaseUrl -> Url -> Url
 fixRelativeUrl (Link bUrl) url
-  | url == "" = bUrl
-  | url == "/" = bUrl
-  | isInfixOf bUrl url = url
-  | last bUrl == '/' && (isPrefixOf "/" url) = bUrl <> (drop 1 url) -- both
-  | last bUrl == '/' && (not $ isPrefixOf "/" url) = bUrl <> url  -- a
-  | last bUrl /= '/' && (isPrefixOf "/" url) = bUrl <> url -- b
-  | last bUrl /= '/' && (not $ isPrefixOf "/" url) = bUrl <> "/" <> url -- neither
-  | otherwise = bUrl <> url  -- fallback case 
+    | url == "" = bUrl
+    | url == "/" = bUrl
+    | isInfixOf bUrl url = url
+    | last bUrl == '/' && (isPrefixOf "/" url) = bUrl <> (drop 1 url)
+    | last bUrl == '/' && (not $ isPrefixOf "/" url) = bUrl <> url
+    | last bUrl /= '/' && (isPrefixOf "/" url) = bUrl <> url
+    | last bUrl /= '/' && (not $ isPrefixOf "/" url) = bUrl <> "/" <> url
+    | otherwise = bUrl <> url
 
-   --- || ((last bUrl /= '/') && (isPrefixOf "/" url)) = bUrl <> url
+{- | Placeholder for stateful HTML retrieval.
 
--- fixRelativeURI :: UURI -> URI.URI -> URI.URI
--- fixRelativeURI base relative = undefined
---   -- confirm that it truly is relative
-  -- 
-
--- | Could set last url in state 
-getHtmlStateful :: Url -> {- StateT SiteDetails -} String
+@since 0.1.0.0
+-}
+getHtmlStateful :: Url -> String
 getHtmlStateful = undefined
 
--- Whatever man
+{- | The most recently visited URL.
+
+@since 0.1.0.0
+-}
 type LastUrl = Link
-type Href = String 
 
+{- | A raw href attribute value.
 
+@since 0.1.0.0
+-}
+type Href = String
+
+{- | Fix a same-site URL relative to the last visited URL.
+
+@since 0.1.0.0
+-}
 fixSameSiteURL :: LastUrl -> Href -> Maybe Url
 fixSameSiteURL _lastUrl _href = undefined
 
+{- | Resolve an href to a full URL using the previous page URL.
 
--- | Generic algorithm for determining full path given last url 
+If the href has a scheme, return it as-is. Otherwise resolve relative to the base.
+
+@since 0.1.0.0
+-}
 fixURL :: LastUrl -> Href -> Url
-fixURL previous href = 
-  -- checkIfSchemeInHref
-  let
-    base = if isPrefixOf "/" href then fromJust $ deriveBaseUrl previous else previous
-    hrefURI = mkURI . pack $ href
-  in
-    case join $ uriScheme <$> hrefURI of
-      -- We could easily check here if authority is the same 
-      Just _ -> href 
-      Nothing -> fixRelativeUrl base href 
-        -- checkIfRelativeToLast -- doesnt start with /
-        -- case isPrefixOf "/" href of
-        --   True -> fixRelativeUrl (deriveBaseUrl previous) href
-        --   False -> fixRelativeUrl previous href 
- 
--- fixURL :: LastUrl -> Href -> Maybe Url
--- fixURL prev href = do
+fixURL previous href =
+    let
+        base = if isPrefixOf "/" href then fromJust $ deriveBaseUrl previous else previous
+        hrefURI = URI.mkURI . T.pack $ href
+     in
+        case join $ URI.uriScheme <$> hrefURI of
+            Just _ -> href
+            Nothing -> fixRelativeUrl base href
 
--- -- | The fromJust should never be called if Links are used properly
--- deriveBaseUrl :: Link -> BaseUrl
--- deriveBaseUrl (Link url) = Link $ mkBaseUrl $ fromJust $ mkURI . pack $ url 
+{- | Derive the base URL (scheme + host) from a 'Link'.
 
--- -- | I think this is good (might also bee good lens practice tho to simplify)
--- mkBaseUrl :: URI -> String
--- mkBaseUrl uri =
---   (unpack $ ((unRText . fromJust) $  uri ^. UL.uriScheme))
---   <> ("://")
---   <> (unpack (unRText $ (fromRight undefined (uri ^. UL.uriAuthority)) ^. UL.authHost))
-  
-------------------------------
-
--- | the fromJust should never be called if Links are used properly
+@since 0.1.0.0
+-}
 deriveBaseUrl :: Link -> Maybe BaseUrl
-deriveBaseUrl (Link url) = mkBaseUrl =<< (mkURI . pack $ url)
+deriveBaseUrl (Link url) = mkBaseUrl =<< (URI.mkURI . T.pack $ url)
 
+{- | Extract scheme and host from a URI to form a base URL.
 
--- | I think this is good (might also bee good lens practice tho to simplify)
-mkBaseUrl :: URI -> Maybe Link 
+@since 0.1.0.0
+-}
+mkBaseUrl :: URI.URI -> Maybe Link
 mkBaseUrl uri = do
-  scheme <- fmap unRText $ uri ^. UL.uriScheme
-  host <- case uri ^. UL.uriAuthority of
-    Right author -> Just $ unRText $ author ^. UL.authHost 
-    Left _ -> Nothing  
-  Just . Link $ (unpack scheme) <> ("://") <> (unpack host)
-  
-  -- (unpack $ ((unRText . fromJust) $  uri ^. UL.uriScheme))
-  -- <> ("://")
-  -- <> (unpack (unRText $ (fromRight undefined (uri ^. UL.uriAuthority)) ^. UL.authHost))
+    scheme <- fmap URI.unRText $ uri Lens.^. UL.uriScheme
+    host <- case uri Lens.^. UL.uriAuthority of
+        Right author -> Just $ URI.unRText $ author Lens.^. UL.authHost
+        Left _ -> Nothing
+    Just . Link $ (T.unpack scheme) <> ("://") <> (T.unpack host)
 
+{- | Type class for types that can be rendered as a URL string.
 
-                    
-  -- if yes 
-  --   then weNeedTheLastUrl
-  --   else deriveBaseUrl 
-  -- deriveBaseUrl
-
--- for the scraper, instead of keeping the baseURL we should store the current URL
--- which can still be used to derive the
-
--- baseURL :: SiteDetails (-> CurrentUrl ->) -> BaseUrl 
-                               
+@since 0.1.0.0
+-}
 class IsLink a where
-  renderLink :: a -> Url 
+    {- | Render the link as a raw URL string.
 
+    @since 0.1.0.0
+    -}
+    renderLink :: a -> Url
 
+{- | Extract the filename from a link's URL path.
 
-
--- lets view Link as meant to contain Informationally derived meaning from internet ; that contains how to get
--- Keeps state for generic streaming 
--- data Link = OuterPage String
---           | SearchFormURL  String
---           | ListingPage [GeneratedLink] PageNumber PageKey String
---           | PageHasPdf String
---           --  PdfLink String
---           | Sourcery (PdfLink) ReferenceSys
-
--- pageKey=param
-
-
-
-
+@since 0.1.0.0
+-}
 getFileName :: Link -> Maybe String
 getFileName = getLastPath
 
+{- | Parser for Digital Object Identifiers.
 
-
-
-doiParser :: ParsecT s u m DOI 
+@since 0.1.0.0
+-}
+doiParser :: ParsecT s u m DOI
 doiParser = undefined
-  -- baseURL is doi.org
-  
-  -- isDOI :: Url -> Bool 
 
+{- | A reference system containing lists of references and sources.
+
+@since 0.1.0.0
+-}
 data ReferenceSys = RefSys [String] [String]
 
+{- | A generated link string.
+
+@since 0.1.0.0
+-}
 type GeneratedLink = String
 
+{- | A namespace identifier (e.g. form field name).
 
--- type PdfLink = String   
--- | Name and Namespace are really same shit; might just converge
--- | Refer to literally "name" attribute
-type Namespace = Text
+@since 0.1.0.0
+-}
+type Namespace = T.Text
 
--- | This is an operationally focused type where
--- | a certain namespace is found to have n num of Options
-type Option = Text 
+{- | An option value within a namespace.
 
+@since 0.1.0.0
+-}
+type Option = T.Text
 
--- | More for show / reasoning rn .. non-optimal
-data QParams = Opt (Map Namespace [Option]) | SimpleKV (Text, Text)
+{- | Query parameters, either as namespace-options or simple key-value pairs.
 
+@since 0.1.0.0
+-}
+data QParams = Opt (Map.Map Namespace [Option]) | SimpleKV (T.Text, T.Text)
 
+{- | A site tree mapping URLs to their visited status.
 
--- SiteTree can be modelled as a stream ; just depends on how we apply it -- if lazily
--- | Inter site urls and whether they have been checked for some pattern
-type SiteTree = [(Bool, Text)]
+@since 0.1.0.0
+-}
+type SiteTree = [(Bool, T.Text)]
 
+{- | A DOM-level link representation before resolution.
 
--- | This wouldnt need to be exported as our interfaces would implement it under the hood
--- | and return a Link'
-data DOMLink = Href' Href
-             | Src Url
-             | PlainLink Url 
---               | LastUrl' String
-          
+@since 0.1.0.0
+-}
+data DOMLink
+    = Href' Href
+    | Src Url
+    | PlainLink Url
 
--- scrapeSameSiteLinks :: ParsecT s u m Link
--- scrapeSameSiteLinks = undefined
+{- | A validated, resolved URL.
 
--- scrapeLinks :: ParsecT s u m Link
--- scrapeLinks = undefined
-
-
+@since 0.1.0.0
+-}
 newtype Link = Link Url deriving (Eq, Show, Read, Ord)
 
--- | This is a general interface for extracting a raw link
--- | from scraping according to specs about the scraper itself
--- | IE if it is 100% same site
+{- | Parse and validate a link from a raw URL string.
+
+Handles relative URLs, scheme detection, and same-site filtering.
+
+@since 0.1.0.0
+-}
 parseLink :: Bool -> Link -> Url -> Maybe Link
-parseLink onlySameSite lastLink newLink = 
-  case hasNoURIScheme newLink of
-    True -> Just . Link $ fixRelativeUrl (fromJust $ deriveBaseUrl lastLink) newLink
-    False -> case isHTTP newLink of
-      False -> Nothing 
-      True -> case onlySameSite of
-        False ->  Just . Link $ newLink
-        True -> case sameAuthority newLink lastLink of
-          False -> Nothing
-          True -> Just . Link $ newLink
+parseLink onlySameSite lastLink newLink =
+    case hasNoURIScheme newLink of
+        True -> Just . Link $ fixRelativeUrl (fromJust $ deriveBaseUrl lastLink) newLink
+        False -> case isHTTP newLink of
+            False -> Nothing
+            True -> case onlySameSite of
+                False -> Just . Link $ newLink
+                True -> case sameAuthority newLink lastLink of
+                    False -> Nothing
+                    True -> Just . Link $ newLink
   where
-    hasNoURIScheme url = (join $ fmap uriScheme $ mkURI . pack $ url) == Nothing
+    hasNoURIScheme url = (join $ fmap URI.uriScheme $ URI.mkURI . T.pack $ url) == Nothing
     isHTTP url = elem (fromMaybe "" (fmap NURI.uriScheme $ NURI.parseURI url)) ["https:", "http:"]
 
+{- | Check whether two URLs share the same authority (domain).
+
+@since 0.1.0.0
+-}
 sameAuthority :: Url -> Link -> Bool
 sameAuthority href (Link linky) =
-  let
-    getMainAuthority = last . splitOn "." . pack
-    getRegName l = fmap (getMainAuthority . NURI.uriRegName) $ NURI.uriAuthority =<< NURI.parseURI l
-  in case (==) <$> (getRegName href) <*> (getRegName linky) of
-    Nothing -> False 
-    Just b -> b
+    let
+        getMainAuthority = last . T.splitOn "." . T.pack
+        getRegName l = fmap (getMainAuthority . NURI.uriRegName) $ NURI.uriAuthority =<< NURI.parseURI l
+     in
+        case (==) <$> (getRegName href) <*> (getRegName linky) of
+            Nothing -> False
+            Just b -> b
 
+{- | A hostname string.
 
-type HostName = String 
--- MOVE TO SCRAPPY
+@since 0.1.0.0
+-}
+type HostName = String
+
+{- | Extract the hostname from a 'Link'.
+
+@since 0.1.0.0
+-}
 getHostName :: Link -> Maybe HostName
-getHostName (Link url) = do 
-  uri <- mkURI $ pack url
-  case fmap (unpack . unRText . (^. UL.authHost)) (uri ^. UL.uriAuthority) of
-    Right hn -> Just hn
-    _ -> Nothing 
-    
--- | Only exported interface 
+getHostName (Link url) = do
+    uri <- URI.mkURI $ T.pack url
+    case fmap (T.unpack . URI.unRText . (Lens.^. UL.authHost)) (uri Lens.^. UL.uriAuthority) of
+        Right hn -> Just hn
+        _ -> Nothing
+
+-- | @since 0.1.0.0
 instance IsLink Link where
-  renderLink (Link url) = url 
+    renderLink (Link url) = url
 
+{- | Filter for URLs that are new (not yet visited) and potentially useful.
 
---getHtmlST :: sv -> Link -> m (sv, Html) 
-
-
--- -- | In reality, this is 4 helper functions 
--- link :: (Maybe LastUrl) -> ScraperT Link
--- link onlyThisSite = do
---   link' <- parseOpeningTag linkStuff
---   validateLink onlyThisSite link' 
-
-
--- doesnt have a scheme:
---   NoScheme -> must be same site and relative;-> Just $ relative to current or base URL ? 
---   HasScheme -> if mustBeSS && isSSite then Just url else Nothing 
-
-
--- -- validateLink is gonna be an interface that may use fixURL and sees if its the same site 
--- -- | All 4 scrapers would use validateLink 
--- validateLink :: Bool -> LastUrl -> DOMLink -> Link
--- validateLink ots lastUrl iLink = case ots of
---   True -> ""
---   False -> "" 
-
-
--- Note following ideas
-
--- data Source = Source (Citations, Html)
-
-
-
--- findAdvancedSearchLinks :: ParsecT s u m [String]
--- findAdvancedSearchLinks = undefined
-
-
--- | Core function of module, filters for any links which point to other pages on the current site
--- | and have not been found over the course of scraping the site yet 
--- | filters out urls like https://othersite.com and "#"
+@since 0.1.0.0
+-}
 maybeUsefulNewUrl :: Link -> [(Link, a)] -> Link -> Maybe Link
-maybeUsefulNewUrl baseUrl tree url = maybeUsefulUrl baseUrl url >>= maybeNewUrl tree 
+maybeUsefulNewUrl baseUrl tree url = maybeUsefulUrl baseUrl url >>= maybeNewUrl tree
 
+{- | Check whether a URL has not been visited in the site tree.
 
-
-
+@since 0.1.0.0
+-}
 urlIsNew :: [(a, Url)] -> HrefURI -> Bool
 urlIsNew [] _uri = True
-urlIsNew (branch:tree) uri
-  | eq1 (fmap uriPath (mkURI' (uri))) (fmap uriPath (mkURI' (snd branch))) = False
-  | otherwise = urlIsNew tree uri
+urlIsNew (branch : tree) uri
+    | eq1 (fmap URI.uriPath (mkURI' (uri))) (fmap URI.uriPath (mkURI' (snd branch))) = False
+    | otherwise = urlIsNew tree uri
   where
-    mkURI' :: String -> Maybe URI
-    mkURI' url = mkURI (pack url)
+    mkURI' :: String -> Maybe URI.URI
+    mkURI' url = URI.mkURI (T.pack url)
 
+{- | Check if a link has not been visited, returning 'Nothing' if already seen.
 
-
+@since 0.1.0.0
+-}
 maybeNewUrl :: [(Link, a)] -> Link -> Maybe Link
 maybeNewUrl [] uri = Just uri
-maybeNewUrl (branch:tree) uri =
-  if eq1 (fmap uriPath (mkURI' (renderLink uri))) (fmap uriPath (mkURI' . renderLink . fst $ branch))
-  then Nothing
-  else maybeNewUrl tree uri
-  -- eq1 (fmap uriPath (mkURI' (pack uri))) (fmap uriPath (mkURI' (fst branch))) = False
-  -- otherwise = urlIsNew tree uri
+maybeNewUrl (branch : tree) uri =
+    if eq1 (fmap URI.uriPath (mkURI' (renderLink uri))) (fmap URI.uriPath (mkURI' . renderLink . fst $ branch))
+        then Nothing
+        else maybeNewUrl tree uri
   where
-    mkURI' :: String -> Maybe URI
-    mkURI' url = mkURI (pack url)
-  
+    mkURI' :: String -> Maybe URI.URI
+    mkURI' url = URI.mkURI (T.pack url)
 
+{- | Filter for same-site URLs without JavaScript refs, query strings, or disallowed file types.
 
-
--- | Filters javascript refs, inner page DOM refs, urls with query strings and those that
--- | do not contain the base url of the host site
+@since 0.1.0.0
+-}
 maybeUsefulUrl :: Link -> Link -> Maybe Link
 maybeUsefulUrl (Link baseUrl) url = do
-  _ <- noJSorShit url
-  _ <- numberOfQueryParamsIsZero url
-  _ <- if isInfixOf baseUrl (renderLink url) then return url else Nothing
-  allowableEndings url
-
+    _ <- noJSorShit url
+    _ <- numberOfQueryParamsIsZero url
+    _ <- if isInfixOf baseUrl (renderLink url) then return url else Nothing
+    allowableEndings url
   where
     noJSorShit :: Link -> Maybe Link
     noJSorShit link =
-      if (not $ Prelude.elem True (urlContains link ["javascript", "about", "help", "#"]))
-      then Just url
-      else Nothing
+        if (not $ elem True (urlContains link ["javascript", "about", "help", "#"]))
+            then Just url
+            else Nothing
 
     urlContains :: Link -> [String] -> [Bool]
     urlContains (Link lnk) icases = fmap ((flip isInfixOf) (fmap toLower lnk)) icases
 
     allowableEndings lnk =
-      let lastPath = fromMaybe "" $ getLastPath lnk
-      in
-        if (Prelude.elem '.' lastPath)
-        then allowableFile lastPath lnk -- must be of allowable
-        else Just lnk
+        let lastPath = fromMaybe "" $ getLastPath lnk
+         in if (elem '.' lastPath)
+                then allowableFile lastPath lnk
+                else Just lnk
 
     allowableFile endPath lnk =
-      if Prelude.elem True $ fmap (\x -> isSuffixOf x (fmap toLower endPath)) allowed
-      then Just lnk
-      else Nothing
-      where allowed = [".aspx", ".html", ".pdf", ".php"]
+        if elem True $ fmap (\x -> isSuffixOf x (fmap toLower endPath)) allowed
+            then Just lnk
+            else Nothing
+      where
+        allowed = [".aspx", ".html", ".pdf", ".php"]
 
-    
--- getLastPath :: Url -> String
--- getLastPath url = unpack (unRText (NE.last (snd (fromJust (fromJust (fmap uriPath (mkURI (pack url))))))))
+{- | Extract the last path segment from a link's URL.
 
+@since 0.1.0.0
+-}
 getLastPath :: Link -> Maybe String
-getLastPath (Link url) = do 
-  x <- mkURI $ pack url 
-  x' <- uriPath x
-  Just . unpack . unRText . NE.last . snd $ x'
+getLastPath (Link url) = do
+    x <- URI.mkURI $ T.pack url
+    x' <- URI.uriPath x
+    Just . T.unpack . URI.unRText . NE.last . snd $ x'
 
--- | Input is meant to be right from 
+{- | Filter a list of links for useful new URLs.
+
+@since 0.1.0.0
+-}
 usefulNewUrls :: Link -> [(Link, a)] -> [Link] -> [Maybe Link]
 usefulNewUrls _ _ [] = []
-usefulNewUrls baseUrl tree (link:links) = (maybeUsefulNewUrl baseUrl tree link) : usefulNewUrls baseUrl tree links
+usefulNewUrls baseUrl tree (link : links) = (maybeUsefulNewUrl baseUrl tree link) : usefulNewUrls baseUrl tree links
 
+{- | Filter a list of links for useful URLs.
+
+@since 0.1.0.0
+-}
 usefulUrls :: Link -> [Link] -> [Maybe Link]
 usefulUrls _ [] = []
-usefulUrls baseUrl (link:links) = maybeUsefulUrl baseUrl link : usefulUrls baseUrl links 
+usefulUrls baseUrl (link : links) = maybeUsefulUrl baseUrl link : usefulUrls baseUrl links
 
+{- | Check that a URL has zero query parameters.
+
+@since 0.1.0.0
+-}
 numberOfQueryParamsIsZero :: Link -> Maybe String
 numberOfQueryParamsIsZero (Link uri) = do
-  x <- mkURI (pack uri)
-  if length (uriQuery x) == 0
-  then Just uri
-  else Nothing
+    x <- URI.mkURI (T.pack uri)
+    if length (URI.uriQuery x) == 0
+        then Just uri
+        else Nothing
 
-
-deriveJSON defaultOptions ''Link
+AesonTH.deriveJSON AesonTH.defaultOptions ''Link

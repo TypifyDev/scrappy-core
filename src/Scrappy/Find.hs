@@ -1,283 +1,314 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
-module Scrappy.Find where
+{- |
+Module      : Scrappy.Find
+Description : Search and stream-editing combinators for Parsec parsers
+Copyright   : (c) Galen Sprout, 2024
+License     : BSD-3-Clause
+Maintainer  : galen.sprout@gmail.com
 
---import Scrappy.Elem.Types (ElementRep, GroupHtml(GroupHtml), Elem, mkGH, Elem', TreeHTML, ShowHTML)
--- import Elem.TreeElemParser (findSameTreeH)
---import Scrappy.Types (ScrapeFail(..))
+Provides combinators for finding patterns separated by arbitrary noise
+in a parse stream, sequential matching of multiple patterns, and
+stream-editing (search-and-replace) via Parsec parsers.
+-}
+module Scrappy.Find (
+    -- * Naive finders
 
-import Control.Monad.IO.Class
-import Text.Parsec (ParsecT, ParseError, Parsec, Stream, parse, eof, anyChar, (<|>), try, parserZero
-                   , many)
-import Text.Parsec.Text ()  -- Import Stream Text instance
-import Data.Text (Text)
+    -- | @since 0.1.0.0
+    findNaive,
+    -- | @since 0.1.0.0
+    findNaiveIO,
+
+    -- * Core finders
+
+    -- | @since 0.1.0.0
+    findIO,
+    -- | @since 0.1.0.0
+    find,
+
+    -- * Sequential finders
+
+    -- | @since 0.1.0.0
+    findSequential,
+    -- | @since 0.1.0.0
+    findSequential2,
+    -- | @since 0.1.0.0
+    findSequential3,
+    -- | @since 0.1.0.0
+    findUntilMatch,
+
+    -- * Stream editing
+
+    -- | @since 0.1.0.0
+    streamEdit,
+    -- | @since 0.1.0.0
+    findEdit,
+    -- | @since 0.1.0.0
+    editFirst,
+    -- | @since 0.1.0.0
+    StreamEditCase (..),
+
+    -- * HTML helpers
+
+    -- | @since 0.1.0.0
+    findSomeHTMLNaive,
+    -- | @since 0.1.0.0
+    findSomeHTML,
+
+    -- * Unimplemented placeholders
+
+    -- | @since 0.1.0.0
+    findAllBetween,
+    -- | @since 0.1.0.0
+    buildSequentialElemsParser,
+
+    -- * Low-level building blocks
+
+    -- | @since 0.1.0.0
+    baseParser,
+    -- | @since 0.1.0.0
+    givesNothing,
+    -- | @since 0.1.0.0
+    endStream,
+) where
+
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Either (fromRight)
+import Data.Functor.Identity (Identity)
+import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TB
-import Data.Functor.Identity (Identity)
-import Data.Either (fromRight)
-import Scrappy.Types (ScrapeFail(..))
+import Text.Parsec (
+    ParseError,
+    Parsec,
+    ParsecT,
+    Stream,
+    anyChar,
+    eof,
+    many,
+    parse,
+    parserZero,
+    try,
+    (<|>),
+ )
+import Prelude (Char, Either (..), Maybe (..), Show, String, fmap, length, mempty, print, return, sequenceA, undefined, ($), (.), (<$), (<$>), (<>), (==), (>>))
 
---data ScrapeFail = Eof | NonMatch
+import Scrappy.Types (ScrapeFail (Eof, NonMatch))
 
--- | This module provides an interface for getting patterns seperated by whatever in a given source
--- | that you plan to parse
+{- | Convert a parser into one that returns 'Nothing' on zero matches
+or @'Just' results@ when at least one match is found. Collects all
+matches from the stream, discarding non-matching noise.
 
--- | findSequential(_x) is for information rich elements such as products that should have multiple fields
--- | that the user would like to return 
-
-
-
-
--- | Converts a parsing/scraping pattern to one which either returns Nothing
--- | or Just a list of at least 1 element. Maybe type is used so that there is a clearer
--- | distinction between a failed search and a successful one
-findNaive :: Stream s m Char => ParsecT s u m a -> ParsecT s u m (Maybe [a])
-findNaive p = (justify .  (fromRight mempty) . sequenceA) <$> (find p)
+@since 0.1.0.0
+-}
+findNaive :: (Stream s m Char) => ParsecT s u m a -> ParsecT s u m (Maybe [a])
+findNaive p = (justify . (fromRight mempty) . sequenceA) <$> (find p)
   where
-    justify x = if length x == 0 then Nothing else Just x 
+    justify x = if length x == 0 then Nothing else Just x
 
+{- | Like 'findNaive' but prints each intermediate result via 'liftIO' for
+debugging purposes.
 
+@since 0.1.0.0
+-}
 findNaiveIO :: (MonadIO m, Stream s m Char, Show a) => ParsecT s u m a -> ParsecT s u m (Maybe [a])
-findNaiveIO p = (justify .  (fromRight mempty) . sequenceA) <$> (findIO p)
+findNaiveIO p = (justify . (fromRight mempty) . sequenceA) <$> (findIO p)
   where
-    justify x = if length x == 0 then Nothing else Just x 
+    justify x = if length x == 0 then Nothing else Just x
 
+{- | Like 'find' but prints each intermediate parse result to stdout.
+Useful for debugging parsers interactively.
 
--- | Great for debugging
+@since 0.1.0.0
+-}
 findIO :: (MonadIO m, Stream s m Char, Show a) => ParsecT s u m a -> ParsecT s u m [Either ScrapeFail a]
 findIO parser = do
-  x <- (try (baseParser parser)) <|> givesNothing <|> endStream
-  liftIO $ print x
-  case x of
-    Right _ -> fmap (x :) (find parser)
-    Left Eof -> return []
-    Left NonMatch -> find parser
+    x <- (try (baseParser parser)) <|> givesNothing <|> endStream
+    liftIO $ print x
+    case x of
+        Right _ -> fmap (x :) (find parser)
+        Left Eof -> return []
+        Left NonMatch -> find parser
 
+{- | Find all occurrences of a parser in a stream, returning results
+tagged with 'Right' for matches. Non-matching characters are silently
+skipped, and the search terminates at end-of-input.
 
--- givesNothing :: ParsecT e s m (Either ScrapeFail a) 
--- givesNothing = Left NonMatch <$ anyChar
-
-findSequential :: Stream s m Char => [ParsecT s u m a] -> ParsecT s u m [Either ScrapeFail a]
-findSequential _parsers = undefined -- builds off findUntilMatch
-
-findSequential2 :: Stream s m Char => (ParsecT s u m a, ParsecT s u m b) -> ParsecT s u m (a,b)
-findSequential2 (a,b) = do
-  a' <- findUntilMatch a
-  b' <- findUntilMatch b
-  return (a', b')
-
-findSequential3 :: Stream s m Char => (ParsecT s u m a, ParsecT s u m b, ParsecT s u m c) -> ParsecT s u m (a,b,c)
-findSequential3 (a,b,c) = do
-  a' <- findUntilMatch a
-  
-  b' <- findUntilMatch b
-  c' <- findUntilMatch c
-  return (a', b', c')
-
--- | Like find naive except that finishes parsing on the first match it finds in the document
-findUntilMatch :: Stream s m Char => ParsecT s u m a -> ParsecT s u m a
-findUntilMatch parser = do
-  x <- (try (baseParser parser)) <|> givesNothing
-  case x of
-    Right a -> return a
-    Left NonMatch -> findUntilMatch parser 
-    Left Eof -> parserZero
-
-
--- -- this is for sequencing matches amongst noise
--- findUntilMatch2 :: ParsecT s u m a -> ParsecT s u m (Either ScrapeFail a)
--- findUntilMatch2 parser = do
---   x <- (try (baseParser parser)) <|> givesNothing
---   case x of
---     Right a -> return $ Right a
---     Left NonMatch -> findUntilMatch parser 
---     Left Eof -> parserZero 
-  
-
-
-      
--- -- Note: List will be backwards as is
-find :: Stream s m Char => ParsecT s u m a -> ParsecT s u m [Either ScrapeFail a]
+@since 0.1.0.0
+-}
+find :: (Stream s m Char) => ParsecT s u m a -> ParsecT s u m [Either ScrapeFail a]
 find parser = do
-  x <- (try (baseParser parser)) <|> givesNothing <|> endStream
-  case x of
-    Right _ -> fmap (x :) (find parser)
-    Left Eof -> return []
-    Left NonMatch -> find parser
--- return (x:xs)
+    x <- (try (baseParser parser)) <|> givesNothing <|> endStream
+    case x of
+        Right _ -> fmap (x :) (find parser)
+        Left Eof -> return []
+        Left NonMatch -> find parser
 
--- | Should never throw Left or I did it wrong
--- Uses Text.Builder for O(n) instead of O(n²) performance
-streamEdit :: ParsecT Text () Identity a -> (a -> Text) -> Text -> Text
-streamEdit p f src = TL.toStrict $ TB.toLazyText $
-  fromRight mempty $ parse (try $ findEditBuilder f p) "" src
+{- | Find a sequence of parsers in order. Currently unimplemented.
 
+@since 0.1.0.0
+-}
+findSequential :: (Stream s m Char) => [ParsecT s u m a] -> ParsecT s u m [Either ScrapeFail a]
+findSequential _parsers = undefined
+
+{- | Run two parsers sequentially, skipping noise between them.
+Each parser consumes input up to and including its first match.
+
+@since 0.1.0.0
+-}
+findSequential2 :: (Stream s m Char) => (ParsecT s u m a, ParsecT s u m b) -> ParsecT s u m (a, b)
+findSequential2 (a, b) = do
+    a' <- findUntilMatch a
+    b' <- findUntilMatch b
+    return (a', b')
+
+{- | Run three parsers sequentially, skipping noise between them.
+Each parser consumes input up to and including its first match.
+
+@since 0.1.0.0
+-}
+findSequential3 :: (Stream s m Char) => (ParsecT s u m a, ParsecT s u m b, ParsecT s u m c) -> ParsecT s u m (a, b, c)
+findSequential3 (a, b, c) = do
+    a' <- findUntilMatch a
+    b' <- findUntilMatch b
+    c' <- findUntilMatch c
+    return (a', b', c')
+
+{- | Skip noise characters until the given parser matches, then return the
+matched value. Fails with 'parserZero' if the end of input is reached
+without a match.
+
+@since 0.1.0.0
+-}
+findUntilMatch :: (Stream s m Char) => ParsecT s u m a -> ParsecT s u m a
+findUntilMatch parser = do
+    x <- (try (baseParser parser)) <|> givesNothing
+    case x of
+        Right a -> return a
+        Left NonMatch -> findUntilMatch parser
+        Left Eof -> parserZero
+
+{- | Should never throw Left or I did it wrong
+Uses Text.Builder for O(n) instead of O(n^2) performance
+
+@since 0.1.0.0
+-}
+streamEdit :: ParsecT T.Text () Identity a -> (a -> T.Text) -> T.Text -> T.Text
+streamEdit p f src =
+    TL.toStrict $
+        TB.toLazyText $
+            fromRight mempty $
+                parse (try $ findEditBuilder f p) "" src
 
 -- | Build result using Text.Builder for O(1) appends
-findEditBuilder :: Stream Text m Char => (a -> Text) -> ParsecT Text u m a -> ParsecT Text u m TB.Builder
+findEditBuilder :: (Stream T.Text m Char) => (a -> T.Text) -> ParsecT T.Text u m a -> ParsecT T.Text u m TB.Builder
 findEditBuilder f parser = go
   where
     go = do
-      let endOfStream = try eof >> return Nothing
-      x <- (Just . Left . f <$> try parser) <|> (Just . Right <$> anyChar) <|> endOfStream
-      case x of
-        Just (Left txt) -> (TB.fromText txt <>) <$> go
-        Just (Right chr) -> (TB.singleton chr <>) <$> go
-        Nothing -> return mempty
+        let endOfStream = try eof >> return Nothing
+        x <- (Just . Left . f <$> try parser) <|> (Just . Right <$> anyChar) <|> endOfStream
+        case x of
+            Just (Left txt) -> (TB.fromText txt <>) <$> go
+            Just (Right chr) -> (TB.singleton chr <>) <$> go
+            Nothing -> return mempty
 
+{- | Legacy findEdit for backwards compatibility (now uses Builder internally)
 
--- | Legacy findEdit for backwards compatibility (now uses Builder internally)
-findEdit :: Stream Text m Char => (a -> Text) -> ParsecT Text u m a -> ParsecT Text u m Text
+@since 0.1.0.0
+-}
+findEdit :: (Stream T.Text m Char) => (a -> T.Text) -> ParsecT T.Text u m a -> ParsecT T.Text u m T.Text
 findEdit f parser = fmap (TL.toStrict . TB.toLazyText) (findEditBuilder f parser)
 
+{- | Edit only the first match, leave rest unchanged
 
--- | Edit only the first match, leave rest unchanged
-editFirst :: Stream Text m Char => (a -> Text) -> ParsecT Text u m a -> ParsecT Text u m Text
+@since 0.1.0.0
+-}
+editFirst :: (Stream T.Text m Char) => (a -> T.Text) -> ParsecT T.Text u m a -> ParsecT T.Text u m T.Text
 editFirst f parser = fmap (TL.toStrict . TB.toLazyText) $ go
   where
     go = do
-      let endOfStream = try eof >> return Nothing
-      x <- (Just . Left . f <$> try parser) <|> (Just . Right <$> anyChar) <|> endOfStream
-      case x of
-        Just (Left txt) -> do
-          rest <- many anyChar  -- consume rest without further parsing
-          return $ TB.fromText txt <> TB.fromString rest
-        Just (Right chr) -> (TB.singleton chr <>) <$> go
-        Nothing -> return mempty
+        let endOfStream = try eof >> return Nothing
+        x <- (Just . Left . f <$> try parser) <|> (Just . Right <$> anyChar) <|> endOfStream
+        case x of
+            Just (Left txt) -> do
+                rest <- many anyChar
+                return $ TB.fromText txt <> TB.fromString rest
+            Just (Right chr) -> (TB.singleton chr <>) <$> go
+            Nothing -> return mempty
 
+{- | Internal type for classifying each step of a stream-edit pass.
+'Edit' holds the transformed match, 'Carry' holds a non-matching
+character, and 'EOF' signals end of input.
 
+@since 0.1.0.0
+-}
+data StreamEditCase
+    = EOF
+    | Carry Char
+    | Edit String
 
--- endStream :: (Stream s m t, Show t) => ParsecT s u m (Either ScrapeFail a)
--- endStream = try (eof) >> (return $ Left Eof)
+{- | Lift a parser into a 'Right'-returning parser. This is the
+"base" building block: if the parser succeeds the result is
+wrapped in 'Right'.
 
-
--- return (x:xs)
-
--- Note: StreamEditCase removed - now using Either Text Char with Nothing for EOF
-
-
--- findSome = undefined
--- findSomeSame = findSomeSameEl
-
-
-
-baseParser :: Stream s m Char => ParsecT s u m a -> ParsecT s u m (Either ScrapeFail a)
+@since 0.1.0.0
+-}
+baseParser :: (Stream s m Char) => ParsecT s u m a -> ParsecT s u m (Either ScrapeFail a)
 baseParser parser = fmap Right parser
 
-givesNothing :: Stream s m Char => ParsecT s u m (Either ScrapeFail a) 
+{- | Consume a single character and return @'Left' 'NonMatch'@. Used
+as an alternative branch to skip noise characters one at a time.
+
+@since 0.1.0.0
+-}
+givesNothing :: (Stream s m Char) => ParsecT s u m (Either ScrapeFail a)
 givesNothing = Left NonMatch <$ anyChar
 
+{- | Attempt to match end-of-input and return @'Left' 'Eof'@ on
+success. Uses 'try' so that it does not consume input on failure.
+
+@since 0.1.0.0
+-}
 endStream :: (Stream s m t, Show t) => ParsecT s u m (Either ScrapeFail a)
 endStream = try (eof) >> (return $ Left Eof)
 
+{- | Parse all matches from HTML source, returning 'Nothing' when no
+matches are found. A convenience wrapper around 'findNaive' and
+'parse'.
 
-
-
--- | Just since do we really care about non matches?
-findSomeHTMLNaive :: Stream s Identity Char => Parsec s () a -> s -> (Maybe [a])
+@since 0.1.0.0
+-}
+findSomeHTMLNaive :: (Stream s Identity Char) => Parsec s () a -> s -> (Maybe [a])
 findSomeHTMLNaive parser text =
-  let parser' = findNaive parser  
-  in 
-    case parse parser' "from html:add-in URL soon" text of
-      Left _ -> Nothing 
-      Right maybe_A -> maybe_A
+    let parser' = findNaive parser
+     in case parse parser' "from html:add-in URL soon" text of
+            Left _ -> Nothing
+            Right maybe_A -> maybe_A
 
-findSomeHTML :: Stream s Identity Char => Parsec s () a -> s -> Either ParseError (Maybe [a])
+{- | Parse all matches from HTML source, preserving the 'ParseError'
+on failure. Returns @'Right' ('Maybe' [a])@ on successful parse.
+
+@since 0.1.0.0
+-}
+findSomeHTML :: (Stream s Identity Char) => Parsec s () a -> s -> Either ParseError (Maybe [a])
 findSomeHTML parser text =
-  let parser' = findNaive parser  
-  in parse parser' "from html at this url: <unimplemented - derp>" text
+    let parser' = findNaive parser
+     in parse parser' "from html at this url: <unimplemented - derp>" text
 
--- findFirst :: ParsecT s u m a -> Text -> Maybe a 
--- findFirst = undefined
+{- | Find all patterns between two delimiters. Currently unimplemented.
 
--- findAllHtml :: ParsecT s u m a -> Text -> Maybe a 
--- findAllHtml = undefined
--- | My findAll' function design / runParserOnHtml 
-  --use Maybe instead of Either to toss failure
-  --case [] -> Nothing
-
--- | so it returns :: Maybe [a] = Just [a] | Nothing
-  -- which will be beautiful for modeling at high level from scrape result to scrape result
-
--- | I also really need to implement non-zero, non-ending predicate inner function
--- | like nonZeroSep https://hackage.haskell.org/package/replace-megaparsec-1.4.4.0/docs/src/Replace.Megaparsec.html#sepCap
-
--- | NOTE: I can replace manyTill_ with anyTill from Replace.Megaparsec
-
-
--- within :: m a -> m a -> m a
--- within ma mb = do
---   x <- do
---     ma 
---     y <- mb
-    
---     return mb 
-
-
-
-
-
--- -- Mutually exclusive/non-overlapping patterns 
--- findAll' :: ParsecT s u m a -> ParsecT s u m [a]
--- findAll' parser = do
---   x <- skipManyTill anyChar parser <|> return []
---   xs <- findAll' parser
---   return (x : xs)
-
-
-    
-        
+@since 0.1.0.0
+-}
 findAllBetween :: a
 findAllBetween = undefined
 
+{- | Build a parser that collects sequential element matches.
+Currently unimplemented.
 
-
--- | Use with constructed for parsing datatype 
+@since 0.1.0.0
+-}
 buildSequentialElemsParser :: ParsecT s u m [a]
 buildSequentialElemsParser = undefined
--- | to be applied to inner text of listlike elem
-
-
--- findOnChangeInput :: ParsecT s u m (Elem' a)
--- findOnChangeInput = undefined
--- eg : <select id="s-lg-sel-subjects" name="s-lg-sel-subjects" class="form-control" data-placeholder="All Subjects" onchange="springSpace.publicObj.filterAzBySubject(jQuery(this).val(), 3848);">
-
-
--- | Rewrite to being any pattern "a"
-
--- -- | Note: this isnt necessarily deprecated but just useful for when we want to find many of some pattern
--- -- | that doesnt need to exist right after the previous successful match
--- {-# DEPRECATED findSomeSameEl "need manytill out and useful for find, findAll" #-}
--- findSomeSameEl :: (Stream s m Char, ShowHTML a)
---                => Maybe (ParsecT s u m a)
---                -> Maybe [Elem]
---                -> [(String, Maybe String)]
---                -> ParsecT s u m [TreeHTML a]
--- findSomeSameEl matchh elemOpts attrsSubset = do
---   -- (_, treeH) <- manyTill_ (anyChar) (try $ treeElemParser elemOpts matchh attrsSubset)
---   treeH <- treeElemParser elemOpts matchh attrsSubset
---   treeHs <- findMore matchh treeH
---   case treeHs of
---     [] -> parserFail "no matches" -- by definition: this func should return at least 1 copy 
---     _ -> return (treeH : treeHs)
---   where
---     findMore :: (Stream s m Char, ShowHTML a) =>
---                 Maybe (ParsecT s u m a)
---              -> TreeHTML a
---              -> ParsecT s u m [TreeHTML a]    
---     findMore matchh treeH = do
---       treeH' <- --( fmap (:[]) (skipManyTill anyChar (try $ findSameTreeH matchh treeH) )  )
---                 (do
---                     -- note: using skipManyTill VIOLATES expectations of this functions use
---                     -- this is gonna return something like 19 <a></a> tags since it is not
---                     -- in any way required for the congruent elements to be neighbours 
-                    
---                   x <- skipManyTill anyChar (try $ findSameTreeH matchh treeH)
---                   return (x:[])
---                 )
---                 <|> return []
---       case treeH' of
---         [] -> return []
---         _ -> fmap ((treeH:[]) <>) $ findMore matchh treeH -- TreeHTML : ParsecT s u m [TreeHTML]

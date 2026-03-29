@@ -1,816 +1,862 @@
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE RecordWildCards #-}
--- <-- Only for RecursiveTree a b c ; remove if changed
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies #-}
 
-module Scrappy.Elem.Types where
+{- |
+Module      : Scrappy.Elem.Types
+Description : Core types for HTML element representation, tree structures, and pattern matching
+Copyright   : (c) Galen Sprout, 2024
+License     : BSD-3-Clause
+Maintainer  : galen.sprout@gmail.com
+-}
+module Scrappy.Elem.Types (
+    -- * Type classes
 
-import Scrappy.Links
+    -- | @since 0.1.0.0
+    ShowHTML (..),
+    -- | @since 0.1.0.0
+    ElementRep (..),
+    -- | @since 0.1.0.0
+    InnerHTMLRep (..),
+
+    -- * Core element types
+
+    -- | @since 0.1.0.0
+    TreeHTML (..),
+    -- | @since 0.1.0.0
+    Elem' (..),
+    -- | @since 0.1.0.0
+    InnerTextHTMLTree (..),
+    -- | @since 0.1.0.0
+    InnerTextResult (..),
+
+    -- * Matcher types
+
+    -- | @since 0.1.0.0
+    HTMLMatcher (..),
+    -- | @since 0.1.0.0
+    HTMLMatcherM,
+    -- | @since 0.1.0.0
+    Inner,
+    -- | @since 0.1.0.0
+    HTMLMatcherList,
+    -- | @since 0.1.0.0
+    HTMLBare (..),
+    -- | @since 0.1.0.0
+    HMatcher',
+
+    -- * Type aliases
+
+    -- | @since 0.1.0.0
+    ElemHead,
+    -- | @since 0.1.0.0
+    Attrs,
+    -- | @since 0.1.0.0
+    Elem,
+    -- | @since 0.1.0.0
+    Tag,
+    -- | @since 0.1.0.0
+    Glength,
+    -- | @since 0.1.0.0
+    MaxLength,
+    -- | @since 0.1.0.0
+    TreeIndex,
+
+    -- * Error types
+
+    -- | @since 0.1.0.0
+    AttrsError (..),
+
+    -- * Grouping types
+
+    -- | @since 0.1.0.0
+    GroupHtml (..),
+
+    -- * Clickable and URL types
+
+    -- | @since 0.1.0.0
+    Clickable (..),
+    -- | @since 0.1.0.0
+    UrlPagination (..),
+
+    -- * Experimental tree types
+
+    -- | @since 0.1.0.0
+    MessyTree (..),
+    -- | @since 0.1.0.0
+    MessyTreeMatch (..),
+
+    -- * Functions
+
+    -- | @since 0.1.0.0
+    noPat,
+    -- | @since 0.1.0.0
+    coerceAttrs,
+    -- | @since 0.1.0.0
+    f,
+    -- | @since 0.1.0.0
+    ungroup,
+    -- | @since 0.1.0.0
+    mkGH,
+    -- | @since 0.1.0.0
+    longestElem,
+    -- | @since 0.1.0.0
+    maxLength,
+    -- | @since 0.1.0.0
+    biggestHtmlGroup,
+    -- | @since 0.1.0.0
+    biggestGroup,
+    -- | @since 0.1.0.0
+    getHrefEl,
+    -- | @since 0.1.0.0
+    getHrefAttrs,
+    -- | @since 0.1.0.0
+    elemToStr,
+    -- | @since 0.1.0.0
+    treeElemToStr,
+    -- | @since 0.1.0.0
+    foldFuncMatchlist,
+    -- | @since 0.1.0.0
+    foldFuncTup,
+    -- | @since 0.1.0.0
+    foldFuncTrup,
+    -- | @since 0.1.0.0
+    foldFuncITR,
+    -- | @since 0.1.0.0
+    fHM_c,
+    -- | @since 0.1.0.0
+    makeBranch,
+    -- | @since 0.1.0.0
+    endTag,
+    -- | @since 0.1.0.0
+    enoughMatches,
+    -- | @since 0.1.0.0
+    enoughMatchesTree,
+    -- | @since 0.1.0.0
+    selfClosingTextful,
+    -- | @since 0.1.0.0
+    mkClickableEH,
+    -- | @since 0.1.0.0
+    mkClickable,
+    -- | @since 0.1.0.0
+    getLink,
+    -- | @since 0.1.0.0
+    getSrc,
+
+    -- * Tuple helpers
+
+    -- | @since 0.1.0.0
+    fst',
+    -- | @since 0.1.0.0
+    snd',
+    -- | @since 0.1.0.0
+    thd',
+
+    -- * Derived accessors (upstream _rawInner redesign)
+
+    -- | @since 0.1.0.1
+    _innerTree',
+    -- | @since 0.1.0.1
+    _innerText',
+    -- | @since 0.1.0.1
+    deriveForest,
+    -- | @since 0.1.0.1
+    deriveInnerText,
+    -- | @since 0.1.0.1
+    treeElemToStrNoMatch,
+    -- | @since 0.1.0.1
+    selfClosingElems,
+) where
 
 import Data.Kind (Type)
-import Data.Text (Text, unpack)
-import Data.Map (Map, toList)
 import qualified Data.Map as Map
+import qualified Data.Text as T
 
-import Data.Graph (Tree (Node), Forest)
---import Text.Megaparsec as MParsec (some)
 import Control.Applicative (some)
-import Text.Parsec (ParsecT, Stream, parserZero, string, (<|>), anyChar, char, optional, try, manyTill, alphaNum
-                   , parserFail)
+import Data.Graph (Forest, Tree (Node))
 import Data.Maybe (fromMaybe)
--- Goals: eliminate need for sub tree and inner datatypes ; so Element --> foldr [HTMLMatcher] empty :: Element 
+import Text.Parsec (
+    ParsecT,
+    Stream,
+    alphaNum,
+    anyChar,
+    char,
+    manyTill,
+    optional,
+    parserFail,
+    parserZero,
+    string,
+    try,
+    (<|>),
+ )
 
+import Scrappy.Links (LastUrl, Link, parseLink)
 
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- * Type classes
 
--- MAYBE:
-class HtmlMatcher a where
-  --defines relation between Element -> ITR 
+{- | Type class for values that can be shown as HTML strings.
 
--- practically just show but we dont wanna restrict the entirety
--- of the show class for any sub-datatype in the context of html
--- laws:
-  -- in the expression:
-       -- x <- parser input
-  -- showH x == input
--- This is useful for extracting values while retaining structure for successive parsing 
+Laws: for any parser @p@ and input @input@:
+
+> x <- parse p input
+> showH x == input
+
+This is useful for extracting values while retaining structure for successive parsing.
+
+@since 0.1.0.0
+-}
 class ShowHTML a where
-  showH :: a -> String
+    showH :: a -> String
 
+-- | @since 0.1.0.0
 instance ShowHTML Char where
-  showH = show
+    showH = show
 
-instance Show a => ShowHTML [a] where
-  showH x = show x
+-- | @since 0.1.0.0
+instance (Show a) => ShowHTML [a] where
+    showH x = show x
 
-instance ShowHTML Text where
-  showH = unpack 
+-- | @since 0.1.0.0
+instance ShowHTML T.Text where
+    showH = T.unpack
 
--- a b c are the three main types
--- class RecursiveTree a b c where
---   type (Element c)
---   type (InnerForest c)--   type (HMatcher c) -- may not need this tho
-                 
---   toHtmlGen :: Element c -> HMatcher c
---   elToITR :: Element c -> InnerForest c
---   htmlGenToITR :: HMatcher c -> InnerForest c 
---   concatForest :: InnerForest c -> InnerForest c -> InnerForest c
---    -- must be instance of monoid -- dont need to declare each time 
---   label :: ElemHead -> InnerForest c -> Element c
+{- | Shared accessors for HTML element datatypes.
 
--- need system too for 
--- Just shared accessors of html datatypes 
+@since 0.1.0.0
+-}
 class ElementRep (a :: Type -> Type) where
---type InnerHTMLRep a = something 
-  elTag :: a b -> Elem
-  attrs :: a b -> Attrs
-  innerText' :: a b -> String 
-  matches' :: a b -> [b]
---
+    elTag :: a b -> Elem
+    attrs :: a b -> Attrs
+    innerText' :: a b -> String
+    matches' :: a b -> [b]
 
--- Elem should determine InnerText
--- Summarizes finds as a result of parsing then folding 
--- Recursive fold of multi-constructor structure 
-class (ShowHTML c, ElementRep a) => InnerHTMLRep (a :: Type -> Type)  (b :: Type -> Type) c | a c -> b c where
-  -- type HMatcher a b c :: * -> *
-  foldHtmlMatcher :: [HTMLMatcher a c] -> b c
-  -- emptyInner :: a d
-  innerText :: b c -> String 
-  matches :: b c -> [c]
+{- | Summarises finds as a result of parsing then folding.
+Recursive fold of multi-constructor structure.
 
+@since 0.1.0.0
+-}
+class (ShowHTML c, ElementRep a) => InnerHTMLRep (a :: Type -> Type) (b :: Type -> Type) c | a c -> b c where
+    foldHtmlMatcher :: [HTMLMatcher a c] -> b c
+    innerText :: b c -> String
+    matches :: b c -> [c]
 
+-- * Core element types
 
-noPat :: Maybe (ParsecT s u m String)
-noPat = Nothing
+{- | Tree-based HTML element representation.
+_rawInner is the single source of truth for inner content.
+Both _innerText' and _innerTree' are derived from it.
 
--- | Parser is configured via the return type but gives the input type 
-coerceAttrs :: Attrs -> [(String, Maybe String)]
-coerceAttrs as = (fmap.fmap) f $ toList as 
+@since 0.1.0.0
+-}
+data TreeHTML a = TreeHTML
+    { _topEl :: Elem
+    , _topAttrs :: Map.Map String String
+    , _matches' :: [a]
+    , _rawInner :: [HTMLMatcher TreeHTML a]
+    }
+    deriving (Show)
 
-f :: String -> Maybe String
-f "" = Nothing
-f s = Just s 
+{- | Derive Forest ElemHead from _rawInner (replaces the old _innerTree' field)
 
--- f :: ([a], [b], [c]) -> Elem' a
--- f (x,y,z) = f' x y z
-
--- f' el attrs = Elem' el attrs
-
--------------------------------------------------------------------------------------------------------------------
-
-instance Semigroup (InnerTextHTMLTree a) where
-  InnerTextHTMLTree a b c <> InnerTextHTMLTree d e f' = InnerTextHTMLTree (a <> d) (b <> e) (c <> f')
-
-instance Monoid (InnerTextHTMLTree a) where
-  mempty = InnerTextHTMLTree { _matches = [], _innerText = "", innerTree = [] }
-
-instance Semigroup (InnerTextResult a) where
-  InnerTextResult a b <> InnerTextResult a' b' = InnerTextResult (a <> a') (b <> b')
-
-instance Monoid (InnerTextResult a) where
-  mempty = InnerTextResult { _matchesITR = [], _fullInner = "" }
-
--- instance Num GroupHtml e a where
---   GroupHtml
-
-
---Note that the fullInner would be useful for stepping in cases as well needing some pieces of the
--- whole, in the case, that theres a match (like a form: want a form if it has search in it, then
--- we'd want to use certain html elements within the form such as <input> or <select>
---so result would be : InnerTextResult { match = "Search", fullInner = """<input> ... <select> """ } 
-
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-
--- foldFuncToITR' :: [Elem' a] -> InnerTextResult a -> InnerTextResult a
--- foldFuncToITR' InnerTextResult{..} (Elem'{..}:xs) =
---   func (InnerTextResult (matchesITR <> matchesEl) (fullInner <> innerHtmlFull)) xs 
-
--- case x of
-  -- Elem' x -> [Element (Elem' x)]
-
-
-
--- foldElements' :: [Elem' a] -> InnerTextResult a
--- foldElements' elems = foldr func (mempty :: InnerTextResult a) (fmap Element elems) 
-
-
-
-
--- | Tree
--- func :: Show a => [HTMLMatcher a] -> InnerTextHTMLTree a -> InnerTextHTMLTree a
---     func [] state = state
---     func (htmlM:htmlMatchers) (InnerTextHTMLTree{..}) = case htmlM of
---       IText str -> 
---         func htmlMatchers (InnerTextHTMLTree matches (innerText <> str) innerTree)
---       -- | May need to enforce a Show Instance on 'mat'
---       Match mat -> 
---         func htmlMatchers (InnerTextHTMLTree (mat : matches) (innerText <> (show mat)) innerTree)
---       --concat to fullInnerText
---       Element htmlTree -> --interEl :: ElemHead [HtmlMatcher]
---         func htmlMatchers (InnerTextHTMLTree (matches <> matches' htmlTree) (innerText <> treeElemToStr htmlTree) ((makeBranch htmlTree) : innerTree))
-
-
--- | SimpleElem
---     func :: (ShowHTML a, ElementRep e) => [HTMLMatcher e a] -> InnerTextResult a
---     func state [] = state
---     func InnerTextResult{..} (next:inners) = case next of
---       IText str -> 
---         func (InnerTextResult matches (innerText <> str)) inners 
---       -- | May need to enforce a Show Instance on 'mat'
---       Match mat -> 
---         func (InnerTextResult (mat : matches) (innerText <> (showH mat))) inners 
---       --concat to fullInnerText
---       Element elem  -> --interEl :: ElemHead [HtmlMatcher]
---         func (InnerTextResult (matches' elem <> matches) (innerText <> (innerText' elem))) inners
-
-
-
--- instance InnerHTMLRep Elem' InnerTextHTMLTree c --> deletion of tree; we no longer care for this info
-  
-instance ShowHTML c => InnerHTMLRep TreeHTML InnerTextHTMLTree c where
-  -- type HMatcher TreeHTML InnerTextHTMLTree c = HMatcher' c 
-  -- emptyInner = InnerTextHTMLTree { matches = []
-  --                                , innerText = ""
-  --                                , innerTree = [] }
-  foldHtmlMatcher = foldr fHM_c mempty -- original one
-  matches = _matches
-  innerText = _innerText 
-  
-instance ShowHTML c => InnerHTMLRep Elem' InnerTextResult c where
-  foldHtmlMatcher = foldr foldFuncITR mempty -- partially applied, expecting some a 
-  matches = _matchesITR
-  innerText = _fullInner 
-
--- instance InnerHTMLRep InnerTextResult where
---   type HtmlMatcherM a = HTMLMatcher Elem' a
---   foldHtmlMatcher = foldInners
-
-
-
-instance ElementRep (Elem') where
-  elTag = _el
-  attrs = _attrs
-  innerText' = innerHtmlFull
-  matches' = innerMatches
-
-instance ElementRep (TreeHTML) where
-  elTag = _topEl
-  attrs = _topAttrs
-  innerText' = _innerText'
-  matches' = _matches'
-
-
-
-
-
-instance ShowHTML a => ShowHTML (Elem' a) where
-  showH = elemToStr 
-
-
-
-instance ShowHTML a => ShowHTML (TreeHTML a) where
-  showH = treeElemToStr
-
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-   
-
-
-
-    
--------------------------------------------------------------------------------------------------------------------
-
-
--- | Note, this is the representation i'll be using
--- | _rawInner is the single source of truth for inner content
--- | Both _innerText' and _innerTree' are derived from it
-data TreeHTML a = TreeHTML { _topEl :: Elem
-                           , _topAttrs :: Map String String
-                           --
-                           , _matches' :: [a]
-                           , _rawInner :: [HTMLMatcher TreeHTML a]
-                           } deriving Show
-
--- | Derive Forest ElemHead from _rawInner (replaces the old _innerTree' field)
+@since 0.1.0.1
+-}
 deriveForest :: [HTMLMatcher TreeHTML a] -> Forest ElemHead
 deriveForest matchers =
-  [ Node (_topEl t, _topAttrs t) (deriveForest (_rawInner t))
-  | Element t <- matchers
-  ]
+    [ Node (_topEl t, _topAttrs t) (deriveForest (_rawInner t))
+    | Element t <- matchers
+    ]
 
--- | Backwards-compatible accessor for inner tree structure
--- | Previously this was a field, now it's computed from _rawInner
+{- | Backwards-compatible accessor for inner tree structure.
+Previously this was a field, now it's computed from _rawInner.
+
+@since 0.1.0.1
+-}
 _innerTree' :: TreeHTML a -> Forest ElemHead
 _innerTree' tree = deriveForest (_rawInner tree)
 
--- | Backwards-compatible accessor for inner text/HTML content
--- | Previously this was a field, now it's computed from _rawInner
--- | Note: Match values are rendered as empty strings to avoid ShowHTML constraint
+{- | Backwards-compatible accessor for inner text/HTML content.
+Previously this was a field, now it's computed from _rawInner.
+Note: Match values are rendered as empty strings to avoid ShowHTML constraint.
+
+@since 0.1.0.1
+-}
 _innerText' :: TreeHTML a -> String
 _innerText' tree = deriveInnerText (_rawInner tree)
 
--- | Derive inner text from raw matchers
--- | Note: Match values are rendered as empty strings to avoid ShowHTML constraint
--- | Use deriveInnerTextShow if you need Match values rendered
+{- | Derive inner text from raw matchers.
+Note: Match values are rendered as empty strings to avoid ShowHTML constraint.
+Use deriveInnerTextShow if you need Match values rendered.
+
+@since 0.1.0.1
+-}
 deriveInnerText :: [HTMLMatcher TreeHTML a] -> String
 deriveInnerText = concatMap matcherToStr
   where
     matcherToStr (IText s) = s
     matcherToStr (Element t) = treeElemToStrNoMatch t
-    matcherToStr (Match _) = ""  -- Skip matches to avoid ShowHTML constraint
+    matcherToStr (Match _) = ""
 
--- | Like treeElemToStr but without ShowHTML constraint (matches rendered as empty)
+{- | Like treeElemToStr but without ShowHTML constraint (matches rendered as empty)
+
+@since 0.1.0.1
+-}
 treeElemToStrNoMatch :: TreeHTML a -> String
 treeElemToStrNoMatch (TreeHTML{..}) =
-  if _topEl `elem` selfClosingElems
-  then "<" <> _topEl <> mdToStringPairs _topAttrs <> ">"
-  else "<" <> _topEl <> mdToStringPairs _topAttrs <> ">" <> deriveInnerText _rawInner <> "</" <>  _topEl <> ">"
-  where mdToStringPairs attrsSet = case toList attrsSet of
-          [] -> ""
-          attrList -> " " <> go attrList
-        go [] = ""
-        go (atr:[])        = fst atr <> "=" <> ('"' : snd atr) <> "\""
-        go (atr: attrRest) = fst atr <> "=" <> ('"' : snd atr) <> "\" " <> go attrRest 
+    if _topEl `elem` selfClosingElems
+        then "<" <> _topEl <> mdToStringPairs _topAttrs <> ">"
+        else "<" <> _topEl <> mdToStringPairs _topAttrs <> ">" <> deriveInnerText _rawInner <> "</" <> _topEl <> ">"
+  where
+    mdToStringPairs attrsSet = case Map.toList attrsSet of
+        [] -> ""
+        attrList -> " " <> go attrList
+    go [] = ""
+    go (atr : []) = fst atr <> "=" <> ('"' : snd atr) <> "\""
+    go (atr : attrRest) = fst atr <> "=" <> ('"' : snd atr) <> "\" " <> go attrRest
 
+{- | Intermediate tree structure used when folding HTML matchers.
 
----Future: Make both below into semigroups
-data InnerTextHTMLTree a = InnerTextHTMLTree { _matches :: [a]
-                                             , _innerText :: String
-                                             , innerTree :: Forest ElemHead
-                                             } 
--------------------------------------------------------------------------------------------------------------------
--- | node-like
-data Elem' a = Elem' { _el :: Elem -- change to Elem?
-                     , _attrs :: Map String String --Attrs needs to become map
-                     , innerMatches :: [a] --will be "" if not specified
-                     , innerHtmlFull :: String
-                     } deriving Show
+@since 0.1.0.0
+-}
+data InnerTextHTMLTree a = InnerTextHTMLTree
+    { _matches :: [a]
+    , _innerText :: String
+    , innerTree :: Forest ElemHead
+    }
 
--- instance ToJSON (Elem' a) where
---   toJSON = writeTheHtmlEquivalent 
+{- | Node-like HTML element representation.
 
+@since 0.1.0.0
+-}
+data Elem' a = Elem'
+    { _el :: Elem
+    , _attrs :: Map.Map String String
+    , innerMatches :: [a]
+    , innerHtmlFull :: String
+    }
+    deriving (Show)
 
-data InnerTextResult a = InnerTextResult { _matchesITR :: [a]
-                                         , _fullInner :: String -- set to Nothing if TextOnly
-                                         } deriving Show
--------------------------------------------------------------------------------------------------------------------
+{- | Result of folding inner HTML to a flat text plus matches.
 
-type HMatcher' a b c = [HTMLMatcher b c] -> a c
+@since 0.1.0.0
+-}
+data InnerTextResult a = InnerTextResult
+    { _matchesITR :: [a]
+    , _fullInner :: String
+    }
+    deriving (Show)
 
+-- * Matcher types
 
+{- | The core HTML matching datatype: either inner text, a matched element, or a sub-element.
 
+@since 0.1.0.0
+-}
+data HTMLMatcher (a :: Type -> Type) b = IText String | Element (a b) | Match b deriving (Show)
 
+{- | 'HTMLMatcher' specialised to 'TreeHTML'.
 
-data HTMLMatcher (a :: Type -> Type) b = IText String | Element (a b) | Match b deriving Show
-
-
-
-
-
-
-
+@since 0.1.0.0
+-}
 type HTMLMatcherM a = HTMLMatcher TreeHTML a
--- data HTMLMatcher a = IText String | Match a | Element (TreeHTML a)
+
+{- | 'HTMLMatcher' specialised to 'Elem\''.
+
+@since 0.1.0.0
+-}
 type Inner a = HTMLMatcher Elem' a
 
+{- | 'HTMLMatcher' specialised to lists.
 
+@since 0.1.0.0
+-}
 type HTMLMatcherList a = HTMLMatcher [] a
--- IText String | Match a | Element [] a 
 
+{- | Minimal testing structure for low-level parsing verification.
 
+@since 0.1.0.0
+-}
+data HTMLBare e a = HTMLBare
+    { tag :: Elem
+    , attrsss :: Attrs
+    , htmlM :: [HTMLMatcher e a]
+    }
 
--- mainly for testing
--- allows for minimal steps and ensuring that low level parsing is working
-data HTMLBare e a = HTMLBare { tag :: Elem
-                             , attrsss :: Attrs
-                             , htmlM :: [HTMLMatcher e a]
-                             }
+{- | Type alias for a function that folds a list of 'HTMLMatcher's into a result.
 
+@since 0.1.0.0
+-}
+type HMatcher' a b c = [HTMLMatcher b c] -> a c
 
+-- * Type aliases
 
-type ElemHead = (Elem, Attrs) 
-type Attrs = Map String String
+{- | An element head is a pair of tag name and attributes.
+
+@since 0.1.0.0
+-}
+type ElemHead = (Elem, Attrs)
+
+{- | Attributes are a map from attribute name to attribute value.
+
+@since 0.1.0.0
+-}
+type Attrs = Map.Map String String
+
+{- | An element tag name.
+
+@since 0.1.0.0
+-}
 type Elem = String
 
+{- | Alias for 'String' representing a tag name.
 
-data AttrsError = IncorrectAttrs deriving Show
+@since 0.1.0.0
+-}
+type Tag = String
 
+{- | Number of items in a group.
 
-instance Eq (GroupHtml e a) where
-  GroupHtml _ gl1 ml1 == GroupHtml _ gl2 ml2 = (gl1 * ml1) == (gl2 * ml2)
+@since 0.1.0.0
+-}
+type Glength = Int
 
--- allows for max
-instance Ord (GroupHtml e a) where
-  --  compare multiples of Glength * MaxLength
-  (GroupHtml _ gl1 ml1) <= (GroupHtml _ gl2 ml2) = (gl1 * ml1)  <= (gl2 * ml2)
+{- | Length of the longest element in a group.
 
---Note, maybe there's a way to extend this to being capable of gathering all text-distinct pieces of
---the page
+@since 0.1.0.0
+-}
+type MaxLength = Int
 
--- | At end will be able to do Eq2 of trees where tree params are (tag,attrs)
--- | Need some "Flexible Equality" match
+{- | Index path into a tree structure.
 
-
-
-
-
-
-
--- | Would treeElemParser fail on cases like <input> with no end tag? 
-
-
-
--------------------------------------------------------------------------------------------------------------------
--------------------------------------Experimental---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-data MessyTree a b = Noise b | Nodee a [MessyTree a b]
--- where the data at each node, describes the branch .. eg ElemHead
-data MessyTreeMatch a b c = Noise' a | Match' b | Node' c [MessyTreeMatch a b c] 
-
-
+@since 0.1.0.0
+-}
 type TreeIndex = [Int]
--- What if we made trees a lense? accessible through treeindex 
 
--------------------------------------------------------------------------------------------------------------------
--------------------------------------Experimental---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- * Error types
 
+{- | Attribute parsing error.
 
--- data GroupHtml a = GroupHtml [a] Glength MaxLength deriving Eq -- ... | Nil
+@since 0.1.0.0
+-}
+data AttrsError = IncorrectAttrs deriving (Show)
+
+-- * Grouping types
+
+{- | A group of HTML elements with metadata about group size and longest element.
+
+@since 0.1.0.0
+-}
 data GroupHtml element a = GroupHtml [element a] Glength MaxLength
 
+-- * Clickable and URL types
+
+{- | A clickable element: an element head paired with a link.
+
+@since 0.1.0.0
+-}
+data Clickable = Clickable ElemHead Link deriving (Eq, Show)
+
+{- | Deprecated: use CurrentQuery instead.
+
+@since 0.1.0.0
+-}
+data UrlPagination = UrlPagination String String deriving (Eq, Show)
+
+-- * Experimental tree types
+
+{- | A tree that can contain noise (non-matching content) at the leaves.
+
+@since 0.1.0.0
+-}
+data MessyTree a b = Noise b | Nodee a [MessyTree a b]
+
+{- | A tree that can contain noise, matches, or structured nodes.
+
+@since 0.1.0.0
+-}
+data MessyTreeMatch a b c = Noise' a | Match' b | Node' c [MessyTreeMatch a b c]
+
+-- * Instances
+
+-- | @since 0.1.0.0
+instance Semigroup (InnerTextHTMLTree a) where
+    InnerTextHTMLTree a b c <> InnerTextHTMLTree d e f' = InnerTextHTMLTree (a <> d) (b <> e) (c <> f')
+
+-- | @since 0.1.0.0
+instance Monoid (InnerTextHTMLTree a) where
+    mempty = InnerTextHTMLTree{_matches = [], _innerText = "", innerTree = []}
+
+-- | @since 0.1.0.0
+instance Semigroup (InnerTextResult a) where
+    InnerTextResult a b <> InnerTextResult a' b' = InnerTextResult (a <> a') (b <> b')
+
+-- | @since 0.1.0.0
+instance Monoid (InnerTextResult a) where
+    mempty = InnerTextResult{_matchesITR = [], _fullInner = ""}
+
+-- | @since 0.1.0.0
+instance (ShowHTML c) => InnerHTMLRep TreeHTML InnerTextHTMLTree c where
+    foldHtmlMatcher = foldr fHM_c mempty
+    matches = _matches
+    innerText = _innerText
+
+-- | @since 0.1.0.0
+instance (ShowHTML c) => InnerHTMLRep Elem' InnerTextResult c where
+    foldHtmlMatcher = foldr foldFuncITR mempty
+    matches = _matchesITR
+    innerText = _fullInner
+
+-- | @since 0.1.0.0
+instance ElementRep Elem' where
+    elTag = _el
+    attrs = _attrs
+    innerText' = innerHtmlFull
+    matches' = innerMatches
+
+-- | @since 0.1.0.0
+instance ElementRep TreeHTML where
+    elTag = _topEl
+    attrs = _topAttrs
+    innerText' = Scrappy.Elem.Types._innerText'
+    matches' = _matches'
+
+-- | @since 0.1.0.0
+instance (ShowHTML a) => ShowHTML (Elem' a) where
+    showH = elemToStr
+
+-- | @since 0.1.0.0
+instance (ShowHTML a) => ShowHTML (TreeHTML a) where
+    showH = treeElemToStr
+
+-- | @since 0.1.0.0
+instance Eq (GroupHtml e a) where
+    GroupHtml _ gl1 ml1 == GroupHtml _ gl2 ml2 = (gl1 * ml1) == (gl2 * ml2)
+
+-- | @since 0.1.0.0
+instance Ord (GroupHtml e a) where
+    (GroupHtml _ gl1 ml1) <= (GroupHtml _ gl2 ml2) = (gl1 * ml1) <= (gl2 * ml2)
+
+-- | @since 0.1.0.0
 instance (ElementRep e, Show (e a), Show a, ShowHTML a) => Show (GroupHtml (e :: Type -> Type) a) where
-  show (GroupHtml [] count maxELen) =
-    "GroupHtml { count =" <> show count <> ", longestElem= " <> show maxELen <> ", elemStructure=[]}"
-  show (GroupHtml (e:_) count maxELen) =
-    "GroupHtml { count =" <> show count <> ", longestElem= " <> show maxELen <> ", elemStructure=" <> show e <> "}"
+    show (GroupHtml [] count maxELen) =
+        "GroupHtml { count =" <> show count <> ", longestElem= " <> show maxELen <> ", elemStructure=[]}"
+    show (GroupHtml (e : _) count maxELen) =
+        "GroupHtml { count =" <> show count <> ", longestElem= " <> show maxELen <> ", elemStructure=" <> show e <> "}"
 
-type Glength = Int -- number of items in group
-type MaxLength = Int -- could also just be length of head 
+-- * Functions
 
+{- | Returns 'Nothing', used as a default for no pattern match.
 
+@since 0.1.0.0
+-}
+noPat :: Maybe (ParsecT s u m String)
+noPat = Nothing
 
--- a ~ TreeHTML match
-ungroup :: ElementRep e => GroupHtml e a -> [e a]
-ungroup (GroupHtml xs _ _) = xs 
+{- | Coerce attributes from a 'Map' to an association list, converting empty strings to 'Nothing'.
 
+@since 0.1.0.0
+-}
+coerceAttrs :: Attrs -> [(String, Maybe String)]
+coerceAttrs as = (fmap . fmap) f $ Map.toList as
 
+{- | Convert an empty string to 'Nothing', otherwise 'Just'.
 
-mkGH :: ElementRep e => [e a] -> GroupHtml e a
+@since 0.1.0.0
+-}
+f :: String -> Maybe String
+f "" = Nothing
+f s = Just s
+
+{- | Extract the elements from a 'GroupHtml'.
+
+@since 0.1.0.0
+-}
+ungroup :: (ElementRep e) => GroupHtml e a -> [e a]
+ungroup (GroupHtml xs _ _) = xs
+
+{- | Construct a 'GroupHtml' from a list of elements.
+
+@since 0.1.0.0
+-}
+mkGH :: (ElementRep e) => [e a] -> GroupHtml e a
 mkGH [] = GroupHtml [] 0 0
-mkGH result@(r:_) = GroupHtml result (length result) (length (innerText' r))
+mkGH result@(r : _) = GroupHtml result (length result) (length (innerText' r))
 
+{- | Find the element with the longest inner text.
 
--- so then id go from
-
-  -- Just GroupHtml { count =20, longestElem= 6047, elemStructure=TreeHTML .. 
-
--- to:
-
-  -- (e,a) ; in this case -> ("li", [("class", "resultItem ltr")])
-
-              ---- > put to state
-              ---- > In order to be safe: findNaive (elemParser "li"..) 
-              ---- > with innerText's ; do findNaive linkScraper
-                 ---- > 
-  
-
+@since 0.1.0.0
+-}
 longestElem :: [Elem' a] -> Maybe (Elem' a)
 longestElem [] = Nothing
 longestElem [a] = Just a
-longestElem (x:y:ys) = if length (innerText' x) > length (innerText' y)
-                       then longestElem (x:ys)
-                       else longestElem (y:ys)
+longestElem (x : y : ys) =
+    if length (innerText' x) > length (innerText' y)
+        then longestElem (x : ys)
+        else longestElem (y : ys)
 
+{- | Return the longest list from a list of lists.
 
-
+@since 0.1.0.0
+-}
 maxLength :: [[a]] -> [a]
 maxLength [] = []
 maxLength [a] = a
-maxLength (x:y:ys) = if length x > length y then maxLength (x:ys) else maxLength (y:ys)
+maxLength (x : y : ys) = if length x > length y then maxLength (x : ys) else maxLength (y : ys)
 
+{- | Find the biggest group by the product of count and max element length.
 
-
-biggestHtmlGroup :: [GroupHtml e a] -> GroupHtml e a 
+@since 0.1.0.0
+-}
+biggestHtmlGroup :: [GroupHtml e a] -> GroupHtml e a
 biggestHtmlGroup ghs = foldr maxE (GroupHtml [] 0 0) ghs
   where
-    maxE :: GroupHtml e a -> GroupHtml e a -> GroupHtml e a -- like max elem
+    maxE :: GroupHtml e a -> GroupHtml e a -> GroupHtml e a
     maxE (GroupHtml xs cnt lng) (GroupHtml ys cnt' lng') =
-      if (cnt * lng) > (cnt' * lng')
-      then (GroupHtml xs cnt lng)
-      else (GroupHtml ys cnt' lng')
-           
+        if (cnt * lng) > (cnt' * lng')
+            then (GroupHtml xs cnt lng)
+            else (GroupHtml ys cnt' lng')
 
--- Note: findAllMutExGroups
-biggestGroup :: ElementRep e => [GroupHtml e a] -> GroupHtml e a
+{- | Find the biggest group from a list, using pairwise comparison.
+
+@since 0.1.0.0
+-}
+biggestGroup :: (ElementRep e) => [GroupHtml e a] -> GroupHtml e a
 biggestGroup [] = GroupHtml [] 0 0
 biggestGroup [gh] = gh
 biggestGroup (n0@(GroupHtml _ x1 y1) : n1@(GroupHtml _ x2 y2) : ghs) = case (x1 * y1) > (x2 * y2) of
-  True -> biggestGroup (n0:ghs)
-  False -> biggestGroup (n1:ghs)
-  
+    True -> biggestGroup (n0 : ghs)
+    False -> biggestGroup (n1 : ghs)
 
+{- | Extract an href link from an element.
 
+@since 0.1.0.0
+-}
+getHrefEl :: (ElementRep e) => Bool -> LastUrl -> e a -> Maybe Link
+getHrefEl b cUrl e = getHrefAttrs b cUrl $ attrs e
 
+{- | Extract an href link from an attributes map.
 
-getHrefEl :: ElementRep e => Bool -> LastUrl -> e a -> Maybe Link
-getHrefEl b cUrl e = getHrefAttrs b cUrl $ attrs e 
+@since 0.1.0.0
+-}
+getHrefAttrs :: Bool -> LastUrl -> Map.Map String String -> Maybe Link
+getHrefAttrs b cUrl atribs = parseLink b cUrl =<< Map.lookup "href" atribs
 
-getHrefAttrs :: Bool -> LastUrl -> Map String String -> Maybe Link 
-getHrefAttrs b cUrl atribs = parseLink b cUrl =<< Map.lookup "href" atribs   
+{- | Render an 'Elem\'' as an HTML string.
 
-  
-
--- getHref :: ElementRep e => e a -> Maybe String
--- getHref e = ((Map.lookup "href") . attrs) e
-
-
-
--- f
+@since 0.1.0.0
+-}
 elemToStr :: Elem' a -> String
-elemToStr el = "<" <> elTag el <> buildAttrs (toList (attrs el)) <> ">" <> innerHtmlFull el <> "</" <> elTag el <> ">"
+elemToStr el = "<" <> elTag el <> buildAttrs (Map.toList (attrs el)) <> ">" <> innerHtmlFull el <> "</" <> elTag el <> ">"
   where
     buildAttrs [] = ""
-    buildAttrs (attr:attrss) = " " <> fst attr <> "=" <> "\"" <> snd attr <> "\"" <> buildAttrs attrss
+    buildAttrs (attr : attrss) = " " <> fst attr <> "=" <> "\"" <> snd attr <> "\"" <> buildAttrs attrss
 
+{- | List of HTML self-closing (void) elements
 
--- | List of HTML self-closing (void) elements
+@since 0.1.0.1
+-}
 selfClosingElems :: [String]
 selfClosingElems = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]
 
+{- | Render a 'TreeHTML' as an HTML string.
+
+@since 0.1.0.0
+-}
 treeElemToStr :: (ShowHTML a) => TreeHTML a -> String
 treeElemToStr (TreeHTML{..}) =
-  if _topEl `elem` selfClosingElems
-  then "<" <> _topEl <> mdToStringPairs _topAttrs <> ">"
-  else "<" <> _topEl <> mdToStringPairs _topAttrs <> ">" <> deriveInnerText _rawInner <> "</" <>  _topEl <> ">"
-  where mdToStringPairs attrsSet = case toList attrsSet of
-          [] -> ""
-          attrList -> " " <> go attrList
-        go [] = ""
-        go [atr]           = fst atr <> "=" <> ('"' : snd atr) <> "\""
-        go (atr: attrRest) = fst atr <> "=" <> ('"' : snd atr) <> "\" " <> go attrRest
+    if _topEl `elem` selfClosingElems
+        then "<" <> _topEl <> mdToStringPairs _topAttrs <> ">"
+        else "<" <> _topEl <> mdToStringPairs _topAttrs <> ">" <> deriveInnerText _rawInner <> "</" <> _topEl <> ">"
+  where
+    mdToStringPairs attrsSet = case Map.toList attrsSet of
+        [] -> ""
+        attrList -> " " <> go attrList
+    go [] = ""
+    go [atr] = fst atr <> "=" <> ('"' : snd atr) <> "\""
+    go (atr : attrRest) = fst atr <> "=" <> ('"' : snd atr) <> "\" " <> go attrRest
 
+{- | Fold function for 'HTMLMatcherList' into 'InnerTextResult'. Currently undefined.
 
--- Future concern:
-  -- elem with tree as [Elem a] --> due to lazy evaluation, we dont actually need to summarize these, can just
-  -- leave as is, then the user can execute a command
-        --- especially easily with accompanying
-        -- type TreeIndex = [Int] ; eg [1,4,7] 1st el then 4th el then 7th el
-
--- Future concern: just discards non matching tokensx
+@since 0.1.0.0
+-}
 foldFuncMatchlist :: (ShowHTML a, ElementRep e) => HTMLMatcher e a -> InnerTextResult a -> InnerTextResult a
-foldFuncMatchlist _hMatcher _itr = undefined --case hMatcher of
---   IText str -> 
---     InnerTextResult (_matchesITR itr) (_fullInner itr <> str)
---   -- | May need to enforce a Show Instance on 'mat'
---   Match mat -> 
---     InnerTextResult (mat : _matchesITR itr) (_fullInner itr <> (showH mat))
---   --concat to fullInnerText
---   Element elem  -> --interEl :: ElemHead [HtmlMatcher]
---     InnerTextResult (matches' elem <> _matchesITR itr) (_fullInner itr <> (innerText' elem))
+foldFuncMatchlist _hMatcher _itr = undefined
 
---------------------------------------------------------------------------------------------------------------------Testing-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+{- | Fold function accumulating into a tuple of (inner text, matches).
 
-
--- | Bug found: matches start right way then get reversed 
-
+@since 0.1.0.0
+-}
 foldFuncTup :: (ShowHTML (e a), ShowHTML a, ElementRep e) => HTMLMatcher e a -> (String, [a]) -> (String, [a])
 foldFuncTup hMatcher itr = case hMatcher of
-   IText str ->
-    (str <> fst itr, snd itr)
-    --  May need to enforce a Show Instance on 'mat'
-   Match mat ->
-    (showH mat <> fst itr, snd itr <> [mat])
-  --concat to fullInnerText
-   Element el  -> --interEl :: ElemHead [HtmlMatcher]
-    (showH el <> fst itr, snd itr <> matches' el)
+    IText str ->
+        (str <> fst itr, snd itr)
+    Match mat ->
+        (showH mat <> fst itr, snd itr <> [mat])
+    Element el ->
+        (showH el <> fst itr, snd itr <> matches' el)
 
+{- | Fold function accumulating into a triple of (inner text, matches, forest).
+
+@since 0.1.0.0
+-}
 foldFuncTrup :: (ShowHTML a) => HTMLMatcher TreeHTML a -> (String, [a], Forest ElemHead) -> (String, [a], Forest ElemHead)
 foldFuncTrup hMatcher itr = case hMatcher of
-  IText str ->
-    (str <> fst' itr, snd' itr, thd' itr)
-    --  May need to enforce a Show Instance on 'mat'
-  Match mat ->
-    (showH mat <> fst' itr, snd' itr <> [mat], thd' itr)
-  --concat to fullInnerText
-  Element el  -> --interEl :: ElemHead [HtmlMatcher]
-    (showH el <> fst' itr, snd' itr <> matches' el, thd' itr <> [makeBranch el])
+    IText str ->
+        (str <> fst' itr, snd' itr, thd' itr)
+    Match mat ->
+        (showH mat <> fst' itr, snd' itr <> [mat], thd' itr)
+    Element el ->
+        (showH el <> fst' itr, snd' itr <> matches' el, thd' itr <> [makeBranch el])
 
--- | In our failed test case with the command : parse f "" "<a></div></a>"
-  -- where f :: (Stream s m Char) => ParsecT s u m (TreeHTML String); f = treeElemParser (Just ["a"]) Nothing []
-  --
-  -- we can tell that foldFuncTrup has been called twice (we believe)
-  --
-  -- we will test how an element named "div" inside of "a" element would behave
+{- | Fold function for 'HTMLMatcher' into 'InnerTextResult'.
 
--- | TODO(galen): As we advance scrappy we need to be more realistic in what a clickable is
--- | since here we really have a LinkEl rather than a button (which is clickable but doesn't fit here)
--- | and can emit a side effect such as that of a LinkEl or some other event like we can handle with lazy-js
-data Clickable = Clickable ElemHead Link deriving (Eq, Show)
+@since 0.1.0.0
+-}
+foldFuncITR :: (ShowHTML a, ElementRep e) => HTMLMatcher e a -> InnerTextResult a -> InnerTextResult a
+foldFuncITR hMatcher itr = case hMatcher of
+    IText str ->
+        InnerTextResult (_matchesITR itr) (str <> _fullInner itr)
+    Match mat ->
+        InnerTextResult (_matchesITR itr <> [mat]) (showH mat <> _fullInner itr)
+    Element el ->
+        InnerTextResult (_matchesITR itr <> matches' el) (innerText' el <> _fullInner itr)
 
+{- | Fold function for 'HTMLMatcher' over 'TreeHTML' into 'InnerTextHTMLTree'.
 
--- | In the future this definitely could be expanded upon for our JS interface
--- | right now this only works for links but wouldn't literally click a button 
---mkClickable :: ElemHead -> Elem' a -> Maybe Clickable
---mkClickable eHead emnt = do
-  -- href <- getHref emnt
- -- pure $ Clickable eHead href
+@since 0.1.0.0
+-}
+fHM_c ::
+    (InnerHTMLRep TreeHTML InnerTextHTMLTree a, ShowHTML a) =>
+    HTMLMatcher TreeHTML a ->
+    InnerTextHTMLTree a ->
+    InnerTextHTMLTree a
+fHM_c hMatcher ithT = case hMatcher of
+    IText str ->
+        InnerTextHTMLTree (_matches ithT) (str <> _innerText ithT) (innerTree ithT)
+    Match mat ->
+        InnerTextHTMLTree (_matches ithT <> [mat]) (showH mat <> _innerText ithT) (innerTree ithT)
+    Element htmlTree ->
+        InnerTextHTMLTree (_matches ithT <> matches' htmlTree) (showH htmlTree <> _innerText ithT) (innerTree ithT <> [makeBranch htmlTree])
 
+{- | Create a tree branch from a 'TreeHTML' node.
 
+@since 0.1.0.0
+-}
+makeBranch :: TreeHTML a -> Tree ElemHead
+makeBranch treeH = Node (elTag treeH, attrs treeH) (Scrappy.Elem.Types._innerTree' treeH)
 
-  
--- scrapeClickable :: Stream s m Char => LastUrl -> ParsecT s u m Clickable
--- scrapeClickable lastUrl = do
---   e <- elemParser Nothing (Just $ string "download") [("href", Nothing)]
---   href <- mapMaybe getHref $ pure e 
---   let
---     mkURI' :: Text -> Maybe URI
---     mkURI' = mkURI
---   uri <- mapMaybe mkURI' . pure . pack $ fixUrl lastUrl href 
---   return $ Clickable (elTag e, attrs e) (unpack . render $ uri)
+{- | Parse an end tag for the given element name.
 
+@since 0.1.0.0
+-}
+endTag :: (Stream s m Char) => String -> ParsecT s u m String
+endTag el = try (string ("</" <> el <> ">"))
 
+{- | Verify that the number of matches meets a required minimum for 'Elem\''.
+
+@since 0.1.0.0
+-}
+enoughMatches :: Int -> String -> Map.Map String String -> (String, [a]) -> ParsecT s u m (Elem' a)
+enoughMatches required e a (asString, matchList) =
+    if required <= length matchList
+        then return $ Elem' e a matchList asString
+        else parserFail "not enough matches"
+
+{- | Verify that the number of matches meets a required minimum for 'TreeHTML'.
+
+@since 0.1.0.0
+-}
+enoughMatchesTree :: Int -> String -> Map.Map String String -> (String, [a], Forest ElemHead) -> ParsecT s u m (TreeHTML a)
+enoughMatchesTree required e a (_asString, matchList, _forest) =
+    if required <= length matchList
+        then return $ TreeHTML e a matchList []
+        else parserFail "not enough matches"
+
+{- | Parse inner content for self-closing tags that may contain text (e.g. @\<p\>@).
+
+Self-closing tags do not allow embedded elements, only plaintext.
+The text belonging to the tag is everything up until the next HTML control section.
+
+@since 0.1.0.0
+-}
+selfClosingTextful ::
+    (ShowHTML a, Stream s m Char) =>
+    Maybe (ParsecT s u m a) ->
+    ParsecT s u m [HTMLMatcher e a]
+selfClosingTextful innerP = do
+    _ <- char '>'
+    manyTill
+        ( (try (Match <$> innerP'))
+            <|> (try ((IText . (: [])) <$> anyChar))
+        )
+        ((try anyEndTag) <|> (char '<' >> some alphaNum))
+  where
+    anyEndTag =
+        ( try
+            ( char '<'
+                >> (optional (char '/'))
+                >> some anyChar
+                >> (string " " <|> string ">")
+            )
+        )
+    innerP' = fromMaybe parserZero innerP
+
+{- | Construct a 'Clickable' from an 'ElemHead' by extracting the href attribute.
+
+@since 0.1.0.0
+-}
 mkClickableEH :: Bool -> LastUrl -> ElemHead -> Maybe Clickable
 mkClickableEH booly cUrl (e, ats) = do
-  h <- getHrefAttrs booly cUrl ats
-  pure $ Clickable (e, ats) h
+    h <- getHrefAttrs booly cUrl ats
+    pure $ Clickable (e, ats) h
 
+{- | Construct a 'Clickable' from any 'ElementRep' by extracting the href attribute.
 
-mkClickable :: ElementRep e => Bool -> LastUrl -> e a -> Maybe Clickable
+@since 0.1.0.0
+-}
+mkClickable :: (ElementRep e) => Bool -> LastUrl -> e a -> Maybe Clickable
 mkClickable booly cUrl e = do
-  let ats = attrs e
-  h <- getHrefAttrs booly cUrl ats
-  pure $ Clickable (elTag e,ats) h
+    let ats = attrs e
+    h <- getHrefAttrs booly cUrl ats
+    pure $ Clickable (elTag e, ats) h
 
+{- | Extract the link from a 'Clickable'.
 
+@since 0.1.0.0
+-}
 getLink :: Clickable -> Link
 getLink (Clickable _ link) = link
 
+{- | Extract the src attribute. Currently undefined.
+
+@since 0.1.0.0
+-}
 getSrc :: a
-getSrc = undefined -- just like getHref xo
+getSrc = undefined
 
--- -- |data ElemHead = (Elem/Text, Attrs)
--- -- | Note: Attrs will be changed to being a Map String String
--- makeBranch :: ShowHTML a => TreeHTML a -> Tree ElemHead
--- makeBranch treeH = Node (elTag treeH, attrs treeH) (_innerTree' treeH)
+-- * Tuple helpers
 
+{- | First element of a triple.
 
-
-
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
+@since 0.1.0.0
+-}
 fst' :: (a, b, c) -> a
-fst' (a,_,_) = a
+fst' (a, _, _) = a
 
-snd' :: (a,b,c) -> b
-snd' (_,b,_) = b
+{- | Second element of a triple.
 
-thd' :: (a,b,c) -> c
-thd' (_,_,c) = c
+@since 0.1.0.0
+-}
+snd' :: (a, b, c) -> b
+snd' (_, b, _) = b
 
-foldFuncITR :: (ShowHTML a, ElementRep e) => HTMLMatcher e a -> InnerTextResult a -> InnerTextResult a
-foldFuncITR hMatcher itr = case hMatcher of
-  IText str ->
-    InnerTextResult (_matchesITR itr) (str <> _fullInner itr)
-    --  May need to enforce a Show Instance on 'mat'
-  Match mat ->
-    InnerTextResult (_matchesITR itr <> [mat]) (showH mat <> _fullInner itr)
-  --concat to fullInnerText
-  Element el  -> --interEl :: ElemHead [HtmlMatcher]
-    InnerTextResult (_matchesITR itr <> matches' el) (innerText' el <> _fullInner itr)
+{- | Third element of a triple.
 
-
--- foldFuncITHT :: (ShowHTML a, ElementRep e) => HTMLMatcher TreeHTML a -> InnerTextResult a -> InnerTextResult a
--- We could also implement (with a proper class system, a way to fold to InnerTextResult not just tree
-  -- has performance benefits
-  
-fHM_c :: (InnerHTMLRep TreeHTML InnerTextHTMLTree a, ShowHTML a) =>
-         HTMLMatcher TreeHTML a
-      -> InnerTextHTMLTree a
-      -> InnerTextHTMLTree a
-fHM_c hMatcher ithT = case hMatcher of
-  IText str ->
-    InnerTextHTMLTree (_matches ithT) (str <> _innerText ithT) (innerTree ithT)
-      --  May need to enforce a Show Instance on 'mat'
-  Match mat ->
-    InnerTextHTMLTree (_matches ithT <> [mat]) (showH mat <> _innerText ithT) (innerTree ithT)
-      --concat to fullInnerText
-  Element htmlTree -> --interEl :: ElemHead [HtmlMatcher]
-    InnerTextHTMLTree (_matches ithT <> matches' htmlTree) (showH htmlTree <> _innerText ithT) (innerTree ithT <> [makeBranch htmlTree])
-
-
-makeBranch :: TreeHTML a -> Tree ElemHead
-makeBranch treeH = Node (elTag treeH, attrs treeH) (_innerTree' treeH) -- 2 cases: 
-                   
-
-
-
-endTag :: Stream s m Char => String -> ParsecT s u m String
-endTag el = try (string ("</" <> el <> ">"))
-
-
-enoughMatches :: Int -> String -> Map String String -> (String, [a]) -> ParsecT s u m (Elem' a)
-enoughMatches required e a (asString, matchList) =
-  if required <= length matchList
-  then return $ Elem' e a matchList asString
-  else parserFail "not enough matches" -- should throw real error
-
-enoughMatchesTree :: Int -> String -> Map String String -> (String, [a], Forest ElemHead) -> ParsecT s u m (TreeHTML a)
-enoughMatchesTree required e a (_asString, matchList, _forest) =
-  if required <= length matchList
-  then return $ TreeHTML e a matchList []  -- TODO: propagate rawInner
-  else parserFail "not enough matches" -- should throw real error 
-
-
-
--- | Explanation: This is for the edge case of <p> tags that are allowed to "contain" text without actually having
--- | an end tag
--- | If i recall correctly, self-closing tags dont allow embedded elements, only plaintext.
--- | this means that the text belonging to the tag read, is that up until the next HTML control section
-selfClosingTextful :: (ShowHTML a, Stream s m Char) =>
-                      Maybe (ParsecT s u m a)
-                   -> ParsecT s u m [HTMLMatcher e a]
-selfClosingTextful innerP = do
-  -- Fix: all is prefixed with
-  _ <- char '>'
-  manyTill
-    (
-      (try (Match <$> innerP'))
-      <|> (try ((IText . (:[])) <$> anyChar))
-    )
-    (
-      (try anyEndTag) <|> (char '<' >> some alphaNum)
-    )
-  where anyEndTag = (try (char '<'
-                       >> (optional (char '/'))
-                       >> some anyChar
-                       >> (string " " <|> string ">")))
-        innerP' = fromMaybe parserZero innerP
-
--- is (selfClosingTextful Nothing) if no match desired 
-
-
-
-
----- # DEPRECATED UrlPagination "use CurrentQuery" #
-data UrlPagination = UrlPagination String String deriving (Eq, Show)
-
-
-
---   where
---     func :: Show a => [HTMLMatcher a] -> InnerTextHTMLTree a -> InnerTextHTMLTree a
---     func [] state = state
---     func (htmlM:htmlMatchers) (InnerTextHTMLTree{..}) = case htmlM of
---       IText str -> 
---         func htmlMatchers (InnerTextHTMLTree matches (innerText <> str) innerTree)
---       -- | May need to enforce a Show Instance on 'mat'
---       Match mat -> 
---         func htmlMatchers (InnerTextHTMLTree (mat : matches) (innerText <> (show mat)) innerTree)
---       --concat to fullInnerText
---       Element htmlTree -> --interEl :: ElemHead [HtmlMatcher]
---         func htmlMatchers (InnerTextHTMLTree (matches <> matches' htmlTree) (innerText <> treeElemToStr htmlTree) ((makeBranch htmlTree) : innerTree))
-
-
-
-  
--- -- In future, I may generalize this along with HtmlMatcher to be something * -> * -> *
-
--- instance ToHTMLString a => ToHTMLString (Inner a) where
---   showH NonMatch str = str
---   showH IsMatch x = showH x
-
--- instance ToHTMLString a => ToHTMLString (HTMLMatcher a) where
---   showH IText str = str
---   showH Match x = showH x
---   showH Element treeH = treeElemToStr
-
--- Behaves just like two are right beside each other 
-
-
-  
-
--- Note: I could fold Elem' by labeling as Element then folding to ITR
-
--- (Element $ elem) : [] --> ITR
-
-
-
-
-
--- foldr :: (Elem' -> ITR -> ITR) -> ITR -> [] Element -> ITR 
-
--- for InnerTextResult, should preserve as string
--- for InnerTextHTMLTree , elem and attrs should build new single branch where branch = (,) elem attrs
-
--- my recursive functions can build off of this mutual foldability and work for anything that can provide
--- mutual foldability for any two relations 
-
--- foldFuncToITR :: [Elem' a] -> InnerTextResult a -> InnerTextResult a
--- foldFuncToITR InnerTextResult{..} (Elem'{..}:xs) =
---   func (InnerTextResult (matchesITR <> matchesEl) (fullInner <> innerHtmlFull)) xs 
-
--- case x of
-  -- Elem' x -> [Element (Elem' x)]
-
-
-
--- foldElements :: [Elem' a] -> InnerTextResult a
--- foldElements elems = foldr func (mempty :: InnerTextResult a) (fmap Element elems) 
-
--- foldr func mempty htmlMatchers 
-
--- foldrForHTMLGen :: func@(HMatcher a -> ITR -> ITR) -> mempty -> 
-
-
-
-
--- this builds off the type classification of IsHTMLRep
-
-
-
--- -- Note: Inner a = HtmlMatcher (String, a) a
--- foldInners :: [Inner a] ->  InnerTextResult a
--- foldInners htmlMatchers = func emptyInner htmlMatchers
---   where
---     func :: (ShowHTML a, ElementRep e) => [HTMLMatcher e a] -> InnerTextResult a -> InnerTextResult a
---     func state [] = state
---     func itr (next:inners) = case next of
---       IText str -> 
---         func (InnerTextResult matches (innerText <> str)) inners 
---       -- | May need to enforce a Show Instance on 'mat'
---       Match mat -> 
---         func (InnerTextResult (mat : matches) (innerText <> (showH mat))) inners 
---       --concat to fullInnerText
---       Element elem  -> --interEl :: ElemHead [HtmlMatcher]
---         func (InnerTextResult (matches' elem <> matches itr) (innerText itr <> (innerText' elem))) inners
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
--- instance Eq ((->) a b) where
-  -- eq fx fx' = f (x:xs) = fx x == fx' x && f xs
-
-
---- > A prerequisite would need to be Universe instance 
-type Tag = String 
+@since 0.1.0.0
+-}
+thd' :: (a, b, c) -> c
+thd' (_, _, c) = c

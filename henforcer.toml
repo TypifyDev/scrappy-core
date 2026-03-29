@@ -1,0 +1,129 @@
+[forAnyModule]
+# Require all module header fields
+moduleHeaderDescriptionMustExistNonEmpty = true
+moduleHeaderCopyrightMustExistNonEmpty = true
+moduleHeaderLicenseMustExistNonEmpty = true
+moduleHeaderMaintainerMustExistNonEmpty = true
+
+# Documentation: all exports must be documented — zero tolerance
+maximumExportsPlusHeaderUndocumented = 0
+
+# @since annotations on every export
+maximumExportsWithoutSince = 0
+
+# ZERO open unaliased imports — every import must be explicit or qualified
+allowedOpenUnaliasedImports = 0
+
+# Import aliases must be unique across a module — no exceptions
+allowedAliasUniqueness = { allAliasesUniqueExcept = [], note = "All import aliases must be unique — zero exceptions" }
+
+# Standard qualified import conventions
+[[forAnyModule.allowedQualifications]]
+module = "Data.Text"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "T"
+
+[[forAnyModule.allowedQualifications]]
+module = "Data.Map"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "Map"
+
+[[forAnyModule.allowedQualifications]]
+module = "Data.Map.Strict"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "Map"
+
+[[forAnyModule.allowedQualifications]]
+module = "Data.ByteString.Lazy"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "BL"
+
+[[forAnyModule.allowedQualifications]]
+module = "Data.Aeson"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "Aeson"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true, unqualified = true }
+
+[[forAnyModule.allowedQualifications]]
+module = "Data.Aeson.TH"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "AesonTH"
+
+[[forAnyModule.allowedQualifications]]
+module = "Text.Parsec"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "Psc"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true, unqualified = true }
+
+[[forAnyModule.allowedQualifications]]
+module = "Network.URI"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "NURI"
+
+[[forAnyModule.allowedQualifications]]
+module = "Text.URI"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "URI"
+
+[[forAnyModule.allowedQualifications]]
+module = "Text.URI.Lens"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "UL"
+
+[[forAnyModule.allowedQualifications]]
+module = "Data.List.NonEmpty"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "NE"
+
+[[forAnyModule.allowedQualifications]]
+module = "Control.Lens"
+[[forAnyModule.allowedQualifications.importScheme]]
+qualified = { qualifiedPre = true, qualifiedPost = true }
+alias = "Lens"
+
+# Encapsulate Elem internals — users must go through Scrappy.Elem
+encapsulatedTrees = ["Scrappy.Elem"]
+
+# Module tree dependency enforcement — every module's allowed deps are explicit
+[[forAnyModule.treeDependencies]]
+moduleTree = "Scrappy.Types"
+dependencies = []
+note = "Types is a leaf — no Scrappy.* dependencies"
+
+[[forAnyModule.treeDependencies]]
+moduleTree = "Scrappy.Links"
+dependencies = []
+note = "Links is a leaf — no Scrappy.* dependencies"
+
+[[forAnyModule.treeDependencies]]
+moduleTree = "Scrappy.Find"
+dependencies = ["Scrappy.Types"]
+note = "Find depends only on Types"
+
+[[forAnyModule.treeDependencies]]
+moduleTree = "Scrappy.Scrape"
+dependencies = ["Scrappy.Types", "Scrappy.Elem", "Scrappy.Find", "Scrappy.Links"]
+note = "Scrape uses Elem parsers, Find, Links, and Types"
+
+# Prelude-heavy modules get 1 open import allowance
+[[forSpecifiedModules]]
+module = "Scrappy.Elem.Types"
+allowedOpenUnaliasedImports = 1
+
+# Re-export module needs open imports for module re-exports
+[[forSpecifiedModules]]
+module = "Scrappy.Elem"
+allowedOpenUnaliasedImports = 4

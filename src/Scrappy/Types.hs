@@ -1,56 +1,50 @@
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
-module Scrappy.Types where
+{- |
+Module      : Scrappy.Types
+Description : Core types for the scrappy HTML scraping library
+Copyright   : (c) Galen Sprout, 2024
+License     : BSD-3-Clause
+Maintainer  : galen.sprout@gmail.com
+-}
+module Scrappy.Types (
+    -- * Core types
 
--- may change Types + Links -> Navigation + Something else
+    -- | @since 0.1.0.0
+    Html,
+    -- | @since 0.1.0.0
+    ScrapeFail (..),
 
-import Data.Text (Text)
+    -- * Parser utilities
+
+    -- | @since 0.1.0.0
+    mapMaybe,
+) where
+
+import qualified Data.Text as T
 import Text.Parsec (ParsecT, parserZero)
---import Witherable
+import Prelude (Maybe (..), Show, pure)
 
+{- | Upgrade a parser result via a partial function, failing with 'parserZero' on 'Nothing'.
 
--- -- | Upgrade an error to discard parser 
--- instance Filterable (ParsecT s u f) where
---   mapMaybe f ma = do
---     x <- ma
---     case f x of
---       Just a -> return a 
---       Nothing -> parserZero
-
-
-
+@since 0.1.0.0
+-}
 mapMaybe :: (a -> Maybe b) -> ParsecT s u m a -> ParsecT s u m b
 mapMaybe f ma = do
-  x <- ma
-  case f x of
-    Just a -> pure a
-    Nothing -> parserZero
+    x <- ma
+    case f x of
+        Just a -> pure a
+        Nothing -> parserZero
 
+{- | Failure modes for scraping operations.
 
+@since 0.1.0.0
+-}
+data ScrapeFail = Eof | NonMatch deriving (Show)
 
-data ScrapeFail = Eof | NonMatch deriving Show
+{- | Raw HTML content as 'Text'.
 
--- | Note: both elemParser and treeElemParser are capable of doing greedy or non-greedy matching
-  --treeElemParser (unless its really slow) should be better for non-greedy/focused
-  --elemParser should be better for greedy
-
-
-
--- eitherP :: Alternative m => m a -> m b -> m (Either a b)
--- eitherP a b = (Left <$> a) <|> (Right <$> b)
-
-
-
-  
-
--- IO for requests
--- Either for high level important errors
--- Maybe for Naive scraping logic 
-
-
--- State looking important for managing status of each site as well
--- as scrape coin 
-
--- |  data Processor a b = Processor ThreadId { runFunc :: (a -> b) }
-type Html = Text -- or could be just the pdf, but maybe even URL for storage sake --> could become research graph
-                 -- but in a sense, would be a forest of uncited (yet) publications
+@since 0.1.0.0
+-}
+type Html = T.Text
