@@ -1,4 +1,4 @@
-cabal-version:       2.4
+cabal-version:       3.0
 name:                scrappy-core
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
@@ -27,18 +27,26 @@ description:
         access to information on sites
 
 -- URL for the project homepage or repository.
-homepage:            https://github.com/Ace-Interview-Prep/scrappy
+homepage:            https://github.com/TypifyDev/scrappy
 license:             BSD-3-Clause
 license-file:        LICENSE
 author:              Galen Sprout
 maintainer:          galen.sprout@gmail.com
-bug-reports:         https://github.com/Ace-Interview-Prep/scrappy/issues
+bug-reports:         https://github.com/TypifyDev/scrappy/issues
 x-curated:           uncurated-seeking-adoption
 stability:           Experimental
 category:            Webscraping
 build-type:          Simple
 extra-source-files:  README.MD
+source-repository head
+  type: git
+  location: https://github.com/TypifyDev/scrappy-core
+
+common warnings
+  ghc-options: -Wall -Werror
+
 library
+  import:             warnings
   exposed-modules:    Scrappy.Find
                     , Scrappy.Scrape
                     , Scrappy.Elem
@@ -55,6 +63,7 @@ library
                      , aeson >=2.2.3 && <2.3
                      , bytestring >=0.12.2 && <0.13
                      , containers >=0.7 && <0.8
+                     , henforcer
                      , lens >=5.3.5 && <5.4
                      , modern-uri >=0.3.6 && <0.4
                      , network-uri >=2.6.4 && <2.7
@@ -62,17 +71,25 @@ library
                      , parser-combinators >=1.3.0 && <1.4
                      , text >=2.1.3 && <2.2
                      , transformers >=0.6.1 && <0.7
-                     
+
   hs-source-dirs:      src
   default-language:    Haskell2010
-  ghc-options:         -Wall -Werror
+  ghc-options:         -fplugin Henforcer "-fplugin-opt=Henforcer:-chenforcer.toml"
 
 test-suite scrappy-core-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
-  other-modules:       Scrappy.Elem.SimpleElemParserSpec
+  other-modules:       Scrappy.Elem.ChainHTMLSpec
+                     , Scrappy.Elem.ElemHeadParseSpec
+                     , Scrappy.Elem.ITextElemParserSpec
+                     , Scrappy.Elem.SimpleElemParserSpec
                      , Scrappy.Elem.TreeElemParserSpec
+                     , Scrappy.Elem.TypesSpec
+                     , Scrappy.FindSpec
+                     , Scrappy.LinksSpec
+                     , Scrappy.ScrapeSpec
+                     , Scrappy.TypesSpec
                      , TestUtils
   build-depends:       base
                      , scrappy-core
@@ -82,6 +99,8 @@ test-suite scrappy-core-test
                      , containers
                      , filepath
                      , directory
+                     , text
+                     , transformers
   build-tool-depends:  hspec-discover:hspec-discover >= 2.7 && < 3
   default-language:    Haskell2010
   ghc-options:         -Wall -Werror -threaded -rtsopts -with-rtsopts=-N
